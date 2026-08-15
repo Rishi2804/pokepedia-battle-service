@@ -1,0 +1,12 @@
+services:
+  battle:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pokepedia-battle
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: 3001
+      BATTLE_ALLOWED_ORIGINS: ${BATTLE_ALLOWED_ORIGINS:-http://localhost:1513}
+    restart: unless-stopped

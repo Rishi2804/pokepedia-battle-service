@@ -1,0 +1,28 @@
+{
+  "name": "pokepedia-battle",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "WebSocket battle server for PokePedia's battle simulator, wrapping the Pokemon Showdown sim engine.",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node --import tsx src/index.ts",
+    "build": "tsc -p .",
+    "typecheck": "tsc -p . --noEmit",
+    "selfplay": "tsx scripts/selfplay.ts"
+  },
+  "dependencies": {
+    "@pkmn/client": "^0.7.3",
+    "@pkmn/data": "^0.10.11",
+    "@pkmn/sim": "^0.10.11",
+    "@pkmn/view": "^0.7.3",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@pkmn/randoms": "^0.10.11",
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.2"
+  }
+}
