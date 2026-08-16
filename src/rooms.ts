@@ -2,7 +2,7 @@ import { randomInt, randomUUID } from 'node:crypto';
 import type { PokemonSet } from '@pkmn/sim';
 import { BattleEngine } from './engine.js';
 import { formatFor, type SupportedGen } from './formats.js';
-import type { RoomPhase, ServerMessage, SideID, VisualMetaMap } from './protocol.js';
+import type { Choice, RoomPhase, ServerMessage, SideID, VisualMetaMap } from './protocol.js';
 import { Seat } from './seat.js';
 import { validateTeam } from './teams.js';
 
@@ -53,7 +53,7 @@ export class Room {
 		info: { name: string; team: PokemonSet[]; visualMeta: VisualMetaMap },
 		transport: (message: ServerMessage) => void
 	): SeatInfo {
-		const seat = new Seat();
+		const seat = new Seat(side, this.format);
 		// done first otherwise the joining player's own "room is now full" state would be sent which seat has nothing attached
 		seat.attach(transport);
 		const seatInfo: SeatInfo = { ...info, seatToken: randomUUID(), seat };
@@ -70,48 +70,47 @@ export class Room {
 
 		this.phase = 'battle';
 		this.engine = new BattleEngine();
-		p1.seat.bindStream(this.engine.streams.p1);
-		p2.seat.bindStream(this.engine.streams.p2);
+		// Sprite resolution needs both players' visualMeta merged - a
+		// Transform can turn a Pokemon into a copy of the OPPONENT's, whose
+		// species id then only exists in the opponent's map (see view.ts's
+		// spriteIdFor doc).
+		const visualMeta: VisualMetaMap = { ...p1.visualMeta, ...p2.visualMeta };
+		p1.seat.bindStream(this.engine.streams.p1, visualMeta);
+		p2.seat.bindStream(this.engine.streams.p2, visualMeta);
 		this.engine.start(this.format, { name: p1.name, team: p1.team }, { name: p2.name, team: p2.team });
 		void this.watchForEnd();
 	}
 
 	/**
+	 * Room-lifecycle-only win detection: sets phase to 'ended' (for
+	 * broadcastRoomState and GC eligibility) via the omniscient stream. The
+	 * actual per-seat `{t:'end', winner, view}` message is NOT sent from
+	 * here - each Seat detects |win|/|tie| independently from its own
+	 * stream and sends its own final view (see seat.ts). Duplicating that
+	 * trivial name-comparison is deliberate: this consumer and each seat's
+	 * pump are three independent async iterators over channels demuxed from
+	 * the same underlying stream, with no guaranteed ordering between them,
+	 * so this room-level watcher must not be the thing that triggers a
+	 * seat's projection - it could fire before that seat's own pump has
+	 * processed the very `|win|` chunk being projected.
+	 *
 	 * |win|USERNAME / |tie| (PROTOCOL.md) identify the winner by name, not
-	 * by side - the sim protocol has no per-side "you won" line. This is a
-	 * genuine protocol quirk, not a shortcut: if both seats share a display
-	 * name the winner can't be disambiguated here, same as it can't be in
-	 * the official client.
+	 * by side - the sim protocol has no per-side "you won" line. If both
+	 * seats share a display name the winner can't be disambiguated here,
+	 * same as it can't be in the official client.
 	 */
 	private async watchForEnd(): Promise<void> {
 		if (!this.engine) return;
 		for await (const chunk of this.engine.streams.omniscient) {
 			this.touch();
 			for (const line of chunk.split('\n')) {
-				if (line.startsWith('|win|')) {
-					this.finish(this.sideForName(line.slice('|win|'.length)));
-					return;
-				}
-				if (line.startsWith('|tie|')) {
-					this.finish('tie');
+				if (line.startsWith('|win|') || line.startsWith('|tie|')) {
+					this.phase = 'ended';
+					this.touch();
 					return;
 				}
 			}
 		}
-	}
-
-	private sideForName(name: string): SideID | null {
-		if (this.players.p1?.name === name) return 'p1';
-		if (this.players.p2?.name === name) return 'p2';
-		return null;
-	}
-
-	private finish(winner: SideID | 'tie' | null): void {
-		this.phase = 'ended';
-		this.touch();
-		const message: ServerMessage = { t: 'end', winner };
-		this.players.p1?.seat.send(message);
-		this.players.p2?.seat.send(message);
 	}
 
 	broadcastRoomState(): void {
@@ -124,8 +123,8 @@ export class Room {
 		this.players.p2?.seat.send(message);
 	}
 
-	choose(side: SideID, choice: string): void {
-		this.players[side]?.seat.choose(choice);
+	choose(side: SideID, rqid: number, choice: Choice): void {
+		this.players[side]?.seat.choose(rqid, choice);
 		this.touch();
 	}
 

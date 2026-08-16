@@ -9,7 +9,8 @@
     "start": "node --import tsx src/index.ts",
     "build": "tsc -p .",
     "typecheck": "tsc -p . --noEmit",
-    "selfplay": "tsx scripts/selfplay.ts"
+    "selfplay": "tsx scripts/selfplay.ts",
+    "play": "tsx scripts/client.ts"
   },
   "dependencies": {
     "@pkmn/client": "^0.7.3",

@@ -1,18 +1,28 @@
 /**
- * Random-vs-random battle runner - the regression net for engine wiring.
- * Spins up the battle server in-process on an ephemeral port, plays a full
- * battle for one or all supported gens with randomly generated (but
- * format-legal) teams, and asserts the core privacy invariant: neither
- * seat's stream ever carries the other seat's `|request|`.
+ * Random-vs-random battle runner - the regression net for engine wiring and
+ * the BattleView projection. Spins up the battle server in-process on an
+ * ephemeral port (with the raw-protocol debug channel enabled), plays a
+ * full battle for one or all supported gens with randomly generated (but
+ * format-legal) teams, and asserts:
+ *
+ *  - privacy: neither seat's raw stream ever carries the other seat's
+ *    |request| (the structural guarantee getPlayerStreams gives us,
+ *    verified directly rather than trusted)
+ *  - view invariants: hpPercent/hpColor are always consistent with hp/maxhp
+ *  - the choice API: every choice we send is accepted by src/choices.ts's
+ *    own validation - if it isn't, that's a chooser bug or a resolveChoice
+ *    bug, not a round trip through the sim's own |error|
  *
  * Usage: npm run selfplay [-- --gen N] [-- --verbose]
  */
+process.env.BATTLE_DEBUG_PROTOCOL = '1';
+
 import { Dex, Teams, TeamValidator, type PokemonSet } from '@pkmn/sim';
 import { TeamGenerators } from '@pkmn/randoms';
 import WebSocket from 'ws';
 import { createBattleServer } from '../src/index.js';
 import { type SupportedGen, formatFor, isSupportedGen } from '../src/formats.js';
-import type { ClientMessage, ServerMessage } from '../src/protocol.js';
+import type { BattleView, Choice, ClientMessage, RequestSwitchView, ServerMessage, SideID } from '../src/protocol.js';
 
 Teams.setGeneratorFactory(TeamGenerators);
 
@@ -53,59 +63,70 @@ function legalTeamFor(gen: SupportedGen, formatId: string): PokemonSet[] {
 	throw new Error(`Could not generate an AG-legal gen ${gen} team after ${MAX_TEAM_GEN_ATTEMPTS} attempts`);
 }
 
-interface ShowdownRequest {
-	rqid: number;
-	wait?: boolean;
-	teamPreview?: boolean;
-	forceSwitch?: boolean[];
-	active?: { moves: { move: string; disabled?: boolean }[]; trapped?: boolean }[];
-	side: { pokemon: { active: boolean; condition: string }[] };
-}
-
 function randomOf<T>(items: T[]): T {
 	return items[Math.floor(Math.random() * items.length)];
 }
 
-function aliveBench(request: ShowdownRequest): number[] {
-	return request.side.pokemon
-		.map((p, i) => ({ slot: i + 1, p }))
-		.filter(({ p }) => !p.active && !p.condition.endsWith(' fnt'))
-		.map(({ slot }) => slot);
+function shuffle<T>(items: T[]): T[] {
+	const out = items.slice();
+	for (let i = out.length - 1; i > 0; i--) {
+		const j = Math.floor(Math.random() * (i + 1));
+		[out[i], out[j]] = [out[j], out[i]];
+	}
+	return out;
 }
 
-/** Picks a plausible choice from a raw sim `|request|` payload. Not a
- * general-purpose choice builder (that's @pkmn/view's ChoiceBuilder, Phase 2)
- * - just enough to drive a battle to completion for this test harness. */
-function chooseFor(request: ShowdownRequest): string | null {
-	if (request.wait) return null;
-	if (request.teamPreview) {
-		const size = request.side.pokemon.length;
-		const order = Array.from({ length: size }, (_, i) => i + 1);
-		for (let i = order.length - 1; i > 0; i--) {
-			const j = Math.floor(Math.random() * (i + 1));
-			[order[i], order[j]] = [order[j], order[i]];
+function switchableBench(canSwitch: RequestSwitchView[]): RequestSwitchView[] {
+	return canSwitch.filter(p => !p.active && !p.fainted);
+}
+
+/** Picks a plausible Choice from a BattleView's request - the same role
+ * Phase 1's chooseFor played against raw |request| JSON, now against the
+ * semantic view instead. */
+function chooseFor(view: BattleView): Choice | null {
+	const req = view.request;
+	if (!req) return null;
+
+	switch (req.kind) {
+		case 'wait':
+			return null;
+		case 'teampreview':
+			return { kind: 'team', order: shuffle(req.canSwitch.map(p => p.index)) };
+		case 'switch': {
+			const bench = switchableBench(req.canSwitch);
+			if (bench.length === 0) return null;
+			return { kind: 'switch', index: randomOf(bench).index };
 		}
-		return `team ${order.join('')}`;
+		case 'move': {
+			const usable = req.moves.filter(m => !m.disabled);
+			const bench = req.trapped ? [] : switchableBench(req.canSwitch);
+			if (bench.length > 0 && Math.random() < 0.15) return { kind: 'switch', index: randomOf(bench).index };
+			if (usable.length === 0) return { kind: 'move', index: 1 }; // Struggle
+			return { kind: 'move', index: randomOf(usable).index };
+		}
 	}
-	if (request.forceSwitch) {
-		const bench = aliveBench(request);
-		if (bench.length === 0) return 'pass';
-		return `switch ${randomOf(bench)}`;
+}
+
+/** hpPercent/hpColor are derived fields (view.ts) - recomputed independently
+ * here so a projection bug shows up as a test failure, not just trusted. */
+function checkViewInvariants(view: BattleView, seat: SideID): void {
+	for (const side of [view.me, view.foe]) {
+		for (const slot of side.team) {
+			const expectedPercent = slot.maxhp > 0 ? Math.round((slot.hp / slot.maxhp) * 100) : 0;
+			if (slot.hpPercent !== expectedPercent) {
+				throw new Error(`${seat}: hpPercent mismatch for ${slot.ident}: got ${slot.hpPercent}, expected ${expectedPercent}`);
+			}
+			const expectedColor = expectedPercent > 50 ? 'green' : expectedPercent > 20 ? 'yellow' : 'red';
+			if (slot.hpColor !== expectedColor) {
+				throw new Error(`${seat}: hpColor mismatch for ${slot.ident}: got ${slot.hpColor} (${slot.hpPercent}%), expected ${expectedColor}`);
+			}
+		}
 	}
-	if (request.active) {
-		const activeReq = request.active[0];
-		const usable = activeReq.moves.map((m, i) => ({ slot: i + 1, m })).filter(({ m }) => !m.disabled);
-		const bench = activeReq.trapped ? [] : aliveBench(request);
-		if (bench.length > 0 && Math.random() < 0.15) return `switch ${randomOf(bench)}`;
-		if (usable.length === 0) return 'move 1';
-		return `move ${randomOf(usable).slot}`;
-	}
-	return null;
 }
 
 class TestClient {
 	readonly ws: WebSocket;
-	readonly seenLines: string[] = [];
+	readonly debugLines: string[] = [];
 	private readonly queue: ServerMessage[] = [];
 	private waiter: ((message: ServerMessage) => void) | null = null;
 
@@ -113,7 +134,7 @@ class TestClient {
 		this.ws = new WebSocket(url);
 		this.ws.on('message', raw => {
 			const message: ServerMessage = JSON.parse(raw.toString());
-			if (message.t === 'update') this.seenLines.push(...message.lines);
+			if (message.t === 'debug') this.debugLines.push(...message.lines);
 			if (this.waiter) {
 				const w = this.waiter;
 				this.waiter = null;
@@ -133,6 +154,7 @@ class TestClient {
 	}
 
 	send(message: ClientMessage): void {
+		if (process.env.SELFPLAY_TRACE) console.error('SEND', JSON.stringify(message));
 		this.ws.send(JSON.stringify(message));
 	}
 
@@ -159,52 +181,72 @@ class TestClient {
 	}
 }
 
-/** Drives one seat: replies to every |request| it sees until the battle
- * ends, retrying with a fresh random choice on |error|[Invalid choice]. */
-async function driveSeat(client: TestClient, ownSeat: 'p1' | 'p2'): Promise<{ winner: string | null }> {
-	let lastRequest: ShowdownRequest | null = null;
+/**
+ * Drives one seat: replies to each NEW request it sees until the battle
+ * ends, retrying with a fresh random choice if src/choices.ts rejects a
+ * pick. "New" matters: several `update` messages can carry the same
+ * still-live rqid in a row (e.g. team-preview reveal lines arriving in
+ * separate chunks before the request itself changes), and re-submitting a
+ * choice for an rqid already answered eventually desyncs the battle from a
+ * pileup of redundant choices - a real UI has to guard against this exact
+ * thing, so the fix belongs here, not just in this script.
+ */
+async function driveSeat(client: TestClient, ownSeat: SideID): Promise<{ winner: BattleView['winner'] }> {
+	let lastView: BattleView | null = null;
+	let respondedRqid: number | null = null;
 	let retries = 0;
 
 	for (;;) {
 		const message = await client.next();
 
-		if (message.t === 'end') return { winner: message.winner };
-		if (message.t === 'error') throw new Error(`${ownSeat} server error ${message.code}: ${message.message}`);
-		if (message.t !== 'update') continue;
-
-		for (const line of message.lines) {
-			if (line.startsWith('|request|')) {
-				const payload = line.slice('|request|'.length);
-				if (!payload) continue;
-				lastRequest = JSON.parse(payload) as ShowdownRequest;
-				retries = 0;
+		if (message.t === 'error') {
+			if (message.code !== 'invalid_choice' || !lastView?.request) {
+				throw new Error(`${ownSeat} server error ${message.code}: ${message.message}`);
 			}
-			if (line.startsWith('|error|') && lastRequest) {
-				retries++;
-				if (retries > MAX_CHOICE_RETRIES) {
-					client.send({ t: 'choose', choice: 'default' });
-				} else {
-					const choice = chooseFor(lastRequest);
-					if (choice) client.send({ t: 'choose', choice });
-				}
+			retries++;
+			if (retries > MAX_CHOICE_RETRIES) {
+				throw new Error(`${ownSeat}: exceeded ${MAX_CHOICE_RETRIES} invalid_choice retries: ${message.message}`);
 			}
+			const choice = chooseFor(lastView);
+			if (choice) client.send({ t: 'choose', rqid: lastView.request.rqid, choice });
+			continue;
 		}
 
-		if (lastRequest && !message.lines.some(l => l.startsWith('|error|'))) {
-			const choice = chooseFor(lastRequest);
+		if (message.t === 'end') {
+			checkViewInvariants(message.view, ownSeat);
+			return { winner: message.view.winner };
+		}
+
+		if (message.t !== 'update') continue;
+		checkViewInvariants(message.view, ownSeat);
+
+		if (process.env.SELFPLAY_TRACE) {
+			console.error(`${ownSeat} RECV rqid=${message.view.request?.rqid} kind=${message.view.request?.kind} phase=${message.view.phase}`);
+		}
+
+		const req = message.view.request;
+		if (req && req.rqid !== respondedRqid) {
+			retries = 0;
+			const choice = chooseFor(message.view);
 			if (choice) {
-				client.send({ t: 'choose', choice });
-				lastRequest = null;
+				lastView = message.view;
+				respondedRqid = req.rqid;
+				client.send({ t: 'choose', rqid: req.rqid, choice });
 			}
 		}
 	}
 }
 
 interface PrivacyViolation {
-	seat: 'p1' | 'p2';
+	seat: SideID;
 	line: string;
 }
 
+/** The structural guarantee: getPlayerStreams resolves |split| pairs and
+ * routes sideupdate chunks (which carry |request|) only to the owning
+ * seat's channel. Verified directly against the raw debug lines rather than
+ * inferred from the view - if this ever fails, the bug is upstream of the
+ * projection, in engine.ts/seat.ts's stream wiring. */
 function checkPrivacy(p1Lines: string[], p2Lines: string[]): PrivacyViolation[] {
 	const violations: PrivacyViolation[] = [];
 	for (const [seat, lines, other] of [
@@ -229,43 +271,53 @@ async function runBattle(wsUrl: string, gen: SupportedGen, verbose: boolean): Pr
 
 	const p1 = new TestClient(wsUrl);
 	const p2 = new TestClient(wsUrl);
-	await Promise.all([p1.ready(), p2.ready()]);
+	try {
+		await Promise.all([p1.ready(), p2.ready()]);
 
-	p1.send({ t: 'create', gen, name: 'Player 1', team: team1, visualMeta: {} });
-	const created = await p1.waitFor('created');
+		p1.send({ t: 'create', gen, name: 'Player 1', team: team1, visualMeta: {} });
+		const created = await p1.waitFor('created');
 
-	p2.send({ t: 'join', code: created.code, name: 'Player 2', team: team2, visualMeta: {} });
-	await p2.waitFor('joined');
+		p2.send({ t: 'join', code: created.code, name: 'Player 2', team: team2, visualMeta: {} });
+		await p2.waitFor('joined');
 
-	const battle = Promise.all([driveSeat(p1, 'p1'), driveSeat(p2, 'p2')]);
-	const timeout = new Promise<never>((_, reject) =>
-		setTimeout(() => reject(new Error(`gen ${gen} battle exceeded ${BATTLE_TIMEOUT_MS}ms`)), BATTLE_TIMEOUT_MS)
-	);
-	const [p1Result, p2Result] = await Promise.race([battle, timeout]);
-
-	const violations = checkPrivacy(p1.seenLines, p2.seenLines);
-	p1.close();
-	p2.close();
-
-	if (violations.length > 0) {
-		throw new Error(
-			`gen ${gen}: privacy violation - ${violations.length} request(s) leaked to the wrong seat: ` +
-				violations.map(v => `${v.seat} saw ${v.line.slice(0, 80)}`).join('; ')
+		const battle = Promise.all([driveSeat(p1, 'p1'), driveSeat(p2, 'p2')]);
+		const timeout = new Promise<never>((_, reject) =>
+			setTimeout(() => reject(new Error(`gen ${gen} battle exceeded ${BATTLE_TIMEOUT_MS}ms`)), BATTLE_TIMEOUT_MS)
 		);
-	}
-	if (p1Result.winner !== p2Result.winner) {
-		throw new Error(`gen ${gen}: seats disagree on winner (p1 saw ${p1Result.winner}, p2 saw ${p2Result.winner})`);
-	}
+		const [p1Result, p2Result] = await Promise.race([battle, timeout]);
 
-	console.log(
-		`gen ${gen} (${format}): OK - winner=${p1Result.winner ?? 'none'}, ` +
-			`p1 saw ${p1.seenLines.length} lines, p2 saw ${p2.seenLines.length} lines, no privacy violations`
-	);
-	if (verbose) {
-		console.log(`  --- p1 perspective ---`);
-		for (const line of p1.seenLines) console.log(`  p1> ${line}`);
-		console.log(`  --- p2 perspective ---`);
-		for (const line of p2.seenLines) console.log(`  p2> ${line}`);
+		const violations = checkPrivacy(p1.debugLines, p2.debugLines);
+		if (violations.length > 0) {
+			throw new Error(
+				`gen ${gen}: privacy violation - ${violations.length} request(s) leaked to the wrong seat: ` +
+					violations.map(v => `${v.seat} saw ${v.line.slice(0, 80)}`).join('; ')
+			);
+		}
+		if (p1Result.winner === null || p1Result.winner === undefined) {
+			throw new Error(`gen ${gen}: battle ended without a winner recorded`);
+		}
+		// winner is perspective-relative ('me'/'foe'/'tie'), so p1 and p2 always
+		// disagree in the normal decisive case - only tie should match.
+		if ((p1Result.winner === 'tie') !== (p2Result.winner === 'tie')) {
+			throw new Error(`gen ${gen}: seats disagree on tie (p1 saw ${p1Result.winner}, p2 saw ${p2Result.winner})`);
+		}
+
+		console.log(
+			`gen ${gen} (${format}): OK - winner=${p1Result.winner} (p1's perspective), ` +
+				`p1 saw ${p1.debugLines.length} raw lines, p2 saw ${p2.debugLines.length} raw lines, no privacy violations`
+		);
+		if (verbose) {
+			console.log(`  --- p1 raw lines ---`);
+			for (const line of p1.debugLines) console.log(`  p1> ${line}`);
+			console.log(`  --- p2 raw lines ---`);
+			for (const line of p2.debugLines) console.log(`  p2> ${line}`);
+		}
+	} finally {
+		// Always close both sockets, even on failure/timeout - an orphaned
+		// open connection makes the server's wss.close() (main()) hang
+		// forever waiting for it to disconnect on its own.
+		p1.close();
+		p2.close();
 	}
 }
 

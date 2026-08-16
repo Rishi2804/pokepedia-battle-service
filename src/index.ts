@@ -3,7 +3,7 @@ import { pathToFileURL } from 'node:url';
 import type { PokemonSet } from '@pkmn/sim';
 import { type RawData, WebSocketServer, type WebSocket } from 'ws';
 import { isSupportedGen } from './formats.js';
-import type { ClientMessage, ErrorCode, ServerMessage, SideID, VisualMetaMap } from './protocol.js';
+import type { Choice, ClientMessage, ErrorCode, ServerMessage, SideID, VisualMetaMap } from './protocol.js';
 import { Room, RoomRegistry } from './rooms.js';
 
 const DEFAULT_PORT = Number(process.env.PORT ?? 3001);
@@ -49,6 +49,24 @@ function isPokemonSetArray(value: unknown): value is PokemonSet[] {
 
 function isVisualMetaMap(value: unknown): value is VisualMetaMap {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isChoice(value: unknown): value is Choice {
+	if (typeof value !== 'object' || value === null || !('kind' in value)) return false;
+	const v = value as Record<string, unknown>;
+	switch (v.kind) {
+		case 'move':
+			return typeof v.index === 'number';
+		case 'switch':
+			return typeof v.index === 'number';
+		case 'team':
+			return Array.isArray(v.order) && v.order.every(i => typeof i === 'number');
+		case 'default':
+		case 'undo':
+			return true;
+		default:
+			return false;
+	}
 }
 
 /** Wires up the HTTP health endpoint + WS room protocol, but does not call
@@ -154,11 +172,11 @@ export function createBattleServer(options: BattleServerOptions = {}): BattleSer
 						sendError(ws, 'not_your_turn', 'No active room.');
 						return;
 					}
-					if (typeof message.choice !== 'string') {
+					if (typeof message.rqid !== 'number' || !isChoice(message.choice)) {
 						sendError(ws, 'invalid_message', 'Invalid choice payload.');
 						return;
 					}
-					room.choose(seat, message.choice);
+					room.choose(seat, message.rqid, message.choice);
 					break;
 				}
 				case 'leave': {
