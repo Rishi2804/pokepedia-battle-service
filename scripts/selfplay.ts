@@ -13,7 +13,7 @@
  *    own validation - if it isn't, that's a chooser bug or a resolveChoice
  *    bug, not a round trip through the sim's own |error|
  *
- * Usage: npm run selfplay [-- --gen N] [-- --verbose]
+ * Usage: npm run selfplay [-- --gen N|nationaldex] [-- --verbose]
  */
 process.env.BATTLE_DEBUG_PROTOCOL = '1';
 
@@ -21,18 +21,18 @@ import { Dex, Teams, TeamValidator, type PokemonSet } from '@pkmn/sim';
 import { TeamGenerators } from '@pkmn/randoms';
 import WebSocket from 'ws';
 import { createBattleServer } from '../src/index.js';
-import { type SupportedGen, formatFor, isSupportedGen } from '../src/formats.js';
+import { type BattleFormatKey, formatFor, isBattleFormatKey } from '../src/formats.js';
 import type { BattleView, Choice, ClientMessage, RequestSwitchView, ServerMessage, SideID } from '../src/protocol.js';
 
 Teams.setGeneratorFactory(TeamGenerators);
 
-const ALL_GENS: SupportedGen[] = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+const ALL_FORMAT_KEYS: BattleFormatKey[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 'nationaldex'];
 const BATTLE_TIMEOUT_MS = 30_000;
 const MAX_TEAM_GEN_ATTEMPTS = 20;
 const MAX_CHOICE_RETRIES = 5;
 
 interface Args {
-	gens: SupportedGen[];
+	formatKeys: BattleFormatKey[];
 	verbose: boolean;
 }
 
@@ -40,11 +40,20 @@ function parseArgs(argv: string[]): Args {
 	const verbose = argv.includes('--verbose');
 	const genIdx = argv.indexOf('--gen');
 	if (genIdx !== -1) {
-		const gen = Number(argv[genIdx + 1]);
-		if (!isSupportedGen(gen)) throw new Error(`--gen must be 1-9, got "${argv[genIdx + 1]}"`);
-		return { gens: [gen], verbose };
+		const raw = argv[genIdx + 1];
+		// `--gen nationaldex` is accepted too - the flag name predates there
+		// being a non-numeric format, and renaming it would break muscle memory
+		// for no real gain.
+		const key: unknown = raw === 'nationaldex' ? raw : Number(raw);
+		if (!isBattleFormatKey(key)) throw new Error(`--gen must be 1-9 or "nationaldex", got "${raw}"`);
+		return { formatKeys: [key], verbose };
 	}
-	return { gens: ALL_GENS, verbose };
+	return { formatKeys: ALL_FORMAT_KEYS, verbose };
+}
+
+/** Reads correctly for both a bare gen number and the 'nationaldex' key. */
+function label(formatKey: BattleFormatKey): string {
+	return formatKey === 'nationaldex' ? 'nationaldex' : `gen ${formatKey}`;
 }
 
 /** A team from the random-battle generator is not automatically legal for a
@@ -53,14 +62,17 @@ function parseArgs(argv: string[]): Args {
  * interactions). Retrying with a fresh roll clears these in practice within
  * a handful of attempts (verified during implementation: worst case seen
  * was 2 attempts out of 9 gens). */
-function legalTeamFor(gen: SupportedGen, formatId: string): PokemonSet[] {
+function legalTeamFor(formatKey: BattleFormatKey, formatId: string): PokemonSet[] {
 	const format = Dex.formats.get(formatId, true);
 	const validator = new TeamValidator(format);
+	// There is no national-dex random-battle generator; gen 9's works because
+	// National Dex AG is strictly more permissive than plain gen 9 AG.
+	const generatorGen = formatKey === 'nationaldex' ? 9 : formatKey;
 	for (let attempt = 0; attempt < MAX_TEAM_GEN_ATTEMPTS; attempt++) {
-		const team = Teams.generate(`gen${gen}randombattle`) as PokemonSet[];
+		const team = Teams.generate(`gen${generatorGen}randombattle`) as PokemonSet[];
 		if (validator.validateTeam(team) === null) return team;
 	}
-	throw new Error(`Could not generate an AG-legal gen ${gen} team after ${MAX_TEAM_GEN_ATTEMPTS} attempts`);
+	throw new Error(`Could not generate an AG-legal ${formatKey} team after ${MAX_TEAM_GEN_ATTEMPTS} attempts`);
 }
 
 function randomOf<T>(items: T[]): T {
@@ -264,17 +276,17 @@ function checkPrivacy(p1Lines: string[], p2Lines: string[]): PrivacyViolation[] 
 	return violations;
 }
 
-async function runBattle(wsUrl: string, gen: SupportedGen, verbose: boolean): Promise<void> {
-	const format = formatFor(gen);
-	const team1 = legalTeamFor(gen, format);
-	const team2 = legalTeamFor(gen, format);
+async function runBattle(wsUrl: string, formatKey: BattleFormatKey, verbose: boolean): Promise<void> {
+	const format = formatFor(formatKey);
+	const team1 = legalTeamFor(formatKey, format);
+	const team2 = legalTeamFor(formatKey, format);
 
 	const p1 = new TestClient(wsUrl);
 	const p2 = new TestClient(wsUrl);
 	try {
 		await Promise.all([p1.ready(), p2.ready()]);
 
-		p1.send({ t: 'create', gen, name: 'Player 1', team: team1, visualMeta: {} });
+		p1.send({ t: 'create', formatKey, name: 'Player 1', team: team1, visualMeta: {} });
 		const created = await p1.waitFor('created');
 
 		p2.send({ t: 'join', code: created.code, name: 'Player 2', team: team2, visualMeta: {} });
@@ -282,28 +294,28 @@ async function runBattle(wsUrl: string, gen: SupportedGen, verbose: boolean): Pr
 
 		const battle = Promise.all([driveSeat(p1, 'p1'), driveSeat(p2, 'p2')]);
 		const timeout = new Promise<never>((_, reject) =>
-			setTimeout(() => reject(new Error(`gen ${gen} battle exceeded ${BATTLE_TIMEOUT_MS}ms`)), BATTLE_TIMEOUT_MS)
+			setTimeout(() => reject(new Error(`${label(formatKey)} battle exceeded ${BATTLE_TIMEOUT_MS}ms`)), BATTLE_TIMEOUT_MS)
 		);
 		const [p1Result, p2Result] = await Promise.race([battle, timeout]);
 
 		const violations = checkPrivacy(p1.debugLines, p2.debugLines);
 		if (violations.length > 0) {
 			throw new Error(
-				`gen ${gen}: privacy violation - ${violations.length} request(s) leaked to the wrong seat: ` +
+				`${label(formatKey)}: privacy violation - ${violations.length} request(s) leaked to the wrong seat: ` +
 					violations.map(v => `${v.seat} saw ${v.line.slice(0, 80)}`).join('; ')
 			);
 		}
 		if (p1Result.winner === null || p1Result.winner === undefined) {
-			throw new Error(`gen ${gen}: battle ended without a winner recorded`);
+			throw new Error(`${label(formatKey)}: battle ended without a winner recorded`);
 		}
 		// winner is perspective-relative ('me'/'foe'/'tie'), so p1 and p2 always
 		// disagree in the normal decisive case - only tie should match.
 		if ((p1Result.winner === 'tie') !== (p2Result.winner === 'tie')) {
-			throw new Error(`gen ${gen}: seats disagree on tie (p1 saw ${p1Result.winner}, p2 saw ${p2Result.winner})`);
+			throw new Error(`${label(formatKey)}: seats disagree on tie (p1 saw ${p1Result.winner}, p2 saw ${p2Result.winner})`);
 		}
 
 		console.log(
-			`gen ${gen} (${format}): OK - winner=${p1Result.winner} (p1's perspective), ` +
+			`${label(formatKey)} (${format}): OK - winner=${p1Result.winner} (p1's perspective), ` +
 				`p1 saw ${p1.debugLines.length} raw lines, p2 saw ${p2.debugLines.length} raw lines, no privacy violations`
 		);
 		if (verbose) {
@@ -322,7 +334,7 @@ async function runBattle(wsUrl: string, gen: SupportedGen, verbose: boolean): Pr
 }
 
 async function main(): Promise<void> {
-	const { gens, verbose } = parseArgs(process.argv.slice(2));
+	const { formatKeys, verbose } = parseArgs(process.argv.slice(2));
 	const handle = createBattleServer();
 	await new Promise<void>(resolve => handle.server.listen(0, resolve));
 	const address = handle.server.address();
@@ -330,23 +342,23 @@ async function main(): Promise<void> {
 	const wsUrl = `ws://127.0.0.1:${port}`;
 
 	const failures: string[] = [];
-	for (const gen of gens) {
+	for (const formatKey of formatKeys) {
 		try {
-			await runBattle(wsUrl, gen, verbose);
+			await runBattle(wsUrl, formatKey, verbose);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
-			console.error(`gen ${gen}: FAILED - ${message}`);
-			failures.push(`gen ${gen}: ${message}`);
+			console.error(`${label(formatKey)}: FAILED - ${message}`);
+			failures.push(`${label(formatKey)}: ${message}`);
 		}
 	}
 
 	await handle.close();
 
 	if (failures.length > 0) {
-		console.error(`\n${failures.length}/${gens.length} gen(s) failed.`);
+		console.error(`\n${failures.length}/${formatKeys.length} format(s) failed.`);
 		process.exitCode = 1;
 	} else {
-		console.log(`\nAll ${gens.length} gen(s) passed.`);
+		console.log(`\nAll ${formatKeys.length} format(s) passed.`);
 	}
 }
 

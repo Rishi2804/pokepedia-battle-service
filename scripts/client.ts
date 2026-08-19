@@ -9,16 +9,17 @@
  * that reads a BattleView and emits a Choice.
  *
  * Usage:
- *   npm run play                    # gen 9, play vs. an in-process random bot
+ *   npm run play                    # National Dex, play vs. an in-process random bot
  *   npm run play -- --gen 5         # gen 5, vs. bot
+ *   npm run play -- --gen nationaldex  # National Dex AG (megas + Z-moves + tera)
  *   npm run play -- --create --gen 5   # create a room and wait for an external joiner, print the code
- *   npm run play -- --join ABC123 --gen 5   # join an existing room (gen must match)
+ *   npm run play -- --join ABC123 --gen 5   # join an existing room (format must match)
  */
 import { createInterface } from 'node:readline/promises';
 import { Dex, Teams, TeamValidator, type PokemonSet } from '@pkmn/sim';
 import { TeamGenerators } from '@pkmn/randoms';
 import WebSocket from 'ws';
-import { formatFor, isSupportedGen, type SupportedGen } from '../src/formats.js';
+import { type BattleFormatKey, formatFor, isBattleFormatKey } from '../src/formats.js';
 import type {
 	ActiveView,
 	BattleView,
@@ -36,7 +37,7 @@ const DEFAULT_WS_URL = process.env.BATTLE_WS_URL ?? 'ws://localhost:3001';
 const MAX_TEAM_GEN_ATTEMPTS = 20;
 
 interface Args {
-	gen: SupportedGen;
+	formatKey: BattleFormatKey;
 	mode: 'vs-bot' | 'create' | 'join';
 	joinCode?: string;
 	wsUrl: string;
@@ -44,29 +45,35 @@ interface Args {
 
 function parseArgs(argv: string[]): Args {
 	const genIdx = argv.indexOf('--gen');
-	const gen = genIdx !== -1 ? Number(argv[genIdx + 1]) : 9;
-	if (!isSupportedGen(gen)) throw new Error(`--gen must be 1-9, got "${argv[genIdx + 1]}"`);
+	const raw = genIdx !== -1 ? argv[genIdx + 1] : 'nationaldex';
+	// Defaults to National Dex - it is what a Home team plays, so it is the
+	// most useful thing to be able to poke at by hand.
+	const formatKey: unknown = raw === 'nationaldex' ? raw : Number(raw);
+	if (!isBattleFormatKey(formatKey)) throw new Error(`--gen must be 1-9 or "nationaldex", got "${raw}"`);
 
 	const joinIdx = argv.indexOf('--join');
 	if (joinIdx !== -1) {
 		const code = argv[joinIdx + 1];
 		if (!code) throw new Error('--join requires a room code');
-		return { gen, mode: 'join', joinCode: code, wsUrl: DEFAULT_WS_URL };
+		return { formatKey, mode: 'join', joinCode: code, wsUrl: DEFAULT_WS_URL };
 	}
-	if (argv.includes('--create')) return { gen, mode: 'create', wsUrl: DEFAULT_WS_URL };
-	return { gen, mode: 'vs-bot', wsUrl: DEFAULT_WS_URL };
+	if (argv.includes('--create')) return { formatKey, mode: 'create', wsUrl: DEFAULT_WS_URL };
+	return { formatKey, mode: 'vs-bot', wsUrl: DEFAULT_WS_URL };
 }
 
 /** Same retry-until-legal approach as selfplay.ts - a random-battle team is
  * usually but not always legal for our (looser) AG ruleset. */
-function legalTeamFor(gen: SupportedGen): PokemonSet[] {
-	const format = Dex.formats.get(formatFor(gen), true);
+function legalTeamFor(formatKey: BattleFormatKey): PokemonSet[] {
+	const format = Dex.formats.get(formatFor(formatKey), true);
 	const validator = new TeamValidator(format);
+	// No national-dex random-battle generator exists; gen 9's works because
+	// National Dex AG is strictly more permissive than plain gen 9 AG.
+	const generatorGen = formatKey === 'nationaldex' ? 9 : formatKey;
 	for (let attempt = 0; attempt < MAX_TEAM_GEN_ATTEMPTS; attempt++) {
-		const team = Teams.generate(`gen${gen}randombattle`) as PokemonSet[];
+		const team = Teams.generate(`gen${generatorGen}randombattle`) as PokemonSet[];
 		if (validator.validateTeam(team) === null) return team;
 	}
-	throw new Error(`Could not generate an AG-legal gen ${gen} team after ${MAX_TEAM_GEN_ATTEMPTS} attempts`);
+	throw new Error(`Could not generate an AG-legal ${formatKey} team after ${MAX_TEAM_GEN_ATTEMPTS} attempts`);
 }
 
 class Connection {
@@ -257,8 +264,8 @@ async function promptChoice(view: BattleView): Promise<Choice | null> {
 
 // ---- an in-process random bot, for the default "just let me play" mode ----
 
-async function runBot(connection: Connection, gen: SupportedGen, code: string): Promise<void> {
-	const team = legalTeamFor(gen);
+async function runBot(connection: Connection, formatKey: BattleFormatKey, code: string): Promise<void> {
+	const team = legalTeamFor(formatKey);
 	connection.send({ t: 'join', code, name: 'Bot', team, visualMeta: {} });
 	await connection.waitFor('joined');
 
@@ -307,7 +314,7 @@ async function playAsHuman(connection: Connection): Promise<void> {
 		}
 		if (message.t !== 'update') continue;
 
-		if (message.log.length) console.log('\n' + message.log.join('\n'));
+		if (message.log.length) console.log('\n' + message.log.map(entry => entry.text).join('\n'));
 		renderView(message.view);
 
 		const req = message.view.request;
@@ -328,21 +335,21 @@ async function main(): Promise<void> {
 	const connection = new Connection(args.wsUrl);
 	await connection.ready();
 
-	const team = legalTeamFor(args.gen);
+	const team = legalTeamFor(args.formatKey);
 
 	if (args.mode === 'join') {
 		connection.send({ t: 'join', code: args.joinCode!, name: 'Player', team, visualMeta: {} });
 		const joined = await connection.waitFor('joined');
 		console.log(`Joined room ${joined.code} as ${joined.seat}.`);
 	} else {
-		connection.send({ t: 'create', gen: args.gen, name: 'Player', team, visualMeta: {} });
+		connection.send({ t: 'create', formatKey: args.formatKey, name: 'Player', team, visualMeta: {} });
 		const created = await connection.waitFor('created');
 		console.log(`Created room ${created.code} as ${created.seat} (${created.format}).`);
 
 		if (args.mode === 'vs-bot') {
 			const bot = new Connection(args.wsUrl);
 			await bot.ready();
-			void runBot(bot, args.gen, created.code);
+			void runBot(bot, args.formatKey, created.code);
 		} else {
 			console.log(`Waiting for an opponent to join with code: ${created.code}`);
 		}

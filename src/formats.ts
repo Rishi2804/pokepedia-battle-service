@@ -20,11 +20,68 @@ const SYNTHESIZED_AG_SUFFIX =
 
 export type SupportedGen = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
+/**
+ * What a room plays under. Usually just a generation, but the "Home"/national
+ * team isn't pinned to one game, so it gets National Dex AG instead - every
+ * Pokemon from every gen, with Mega Evolution, Z-Moves and Terastallization
+ * all available at once.
+ */
+export type BattleFormatKey = SupportedGen | 'nationaldex';
+
+/**
+ * The Legends: Z-A Mega Stones. `@pkmn/sim` tags these `isNonstandard: 'Future'`
+ * (unreleased), and National Dex AG only unbans `Past`, so each needs TWO
+ * separate gates opened - neither works alone:
+ *
+ *   +Future      unbans the mega *forme* (e.g. Clefable-Mega)
+ *   +item:<id>   satisfies a second, hardcoded check inside NatDex Mod's own
+ *                onValidateSet (pokemon-showdown/data/rulesets.ts), which walks
+ *                an item back through gens 9->7 looking for a gen where it is
+ *                standard - something a Future item can never satisfy. That
+ *                block has an explicit `+item:` escape hatch; this is it.
+ *
+ * If a future @pkmn/sim bump retags these `Past`, the `+item:` unbans become
+ * harmless no-ops rather than breaking, so this list can just be deleted then.
+ */
+const ZA_MEGA_STONE_IDS = [
+	'absolitez', 'barbaracite', 'baxcalibrite', 'chandelurite',
+	'chesnaughtite', 'chimechite', 'clefablite', 'crabominite', 'darkranite',
+	'delphoxite', 'dragalgite', 'dragoninite', 'drampanite', 'eelektrossite',
+	'emboarite', 'excadrite', 'falinksite', 'feraligite', 'floettite',
+	'froslassite', 'garchompitez', 'glimmoranite', 'golisopite', 'golurkite',
+	'greninjite', 'hawluchanite', 'heatranite', 'lucarionitez', 'magearnite',
+	'malamarite', 'meganiumite', 'meowsticite', 'pyroarite', 'raichunitex',
+	'raichunitey', 'scolipite', 'scovillainite', 'scraftinite', 'skarmorite',
+	'staraptite', 'starminite', 'tatsugirinite', 'victreebelite',
+	'zeraorite', 'zygardite',
+];
+
+/**
+ * `+LGPE` clears the Let's Go tag on Pikachu-Starter / Eevee-Starter and their
+ * exclusive moves (Zippy Zap, Splishy Splash, Floaty Fall). The two `+pokemon:`
+ * unbans clear a *separate* NatDex Mod check that rejects any species with
+ * `natDexTier === 'Illegal'` - it has its own `+pokemon:<id>` hatch, mirroring
+ * the `+item:` one above. These two are the only real species affected; the
+ * rest of that Illegal tier is Gmax formes, Pokestar props and CAP fakemon.
+ */
+const NATIONAL_DEX_FORMAT = [
+	'gen9nationaldexag@@@+Future',
+	'+LGPE',
+	'+pokemon:pikachustarter',
+	'+pokemon:eeveestarter',
+	...ZA_MEGA_STONE_IDS.map(id => `+item:${id}`),
+].join(',');
+
 export function isSupportedGen(gen: number): gen is SupportedGen {
 	return Number.isInteger(gen) && gen >= 1 && gen <= 9;
 }
 
-export function formatFor(gen: SupportedGen): string {
-	if (NATIVE_AG_GENS.has(gen)) return `gen${gen}anythinggoes`;
-	return `gen${gen}customgame${SYNTHESIZED_AG_SUFFIX}`;
+export function isBattleFormatKey(key: unknown): key is BattleFormatKey {
+	return key === 'nationaldex' || (typeof key === 'number' && isSupportedGen(key));
+}
+
+export function formatFor(key: BattleFormatKey): string {
+	if (key === 'nationaldex') return NATIONAL_DEX_FORMAT;
+	if (NATIVE_AG_GENS.has(key)) return `gen${key}anythinggoes`;
+	return `gen${key}customgame${SYNTHESIZED_AG_SUFFIX}`;
 }

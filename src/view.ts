@@ -5,6 +5,7 @@ import type {
 	BattlePhase,
 	BattleView,
 	FieldView,
+	LogKind,
 	Named,
 	RequestMoveView,
 	RequestSwitchView,
@@ -29,7 +30,11 @@ function toId(text: string): string {
  * field, but the sim actually emits `move` (pokemon-showdown sim/pokemon.ts
  * `getMoveRequestData`: `move: move.name`) - verified against a live battle
  * during implementation. Likewise `TeamRequest` types `maxTeamSize`, but the
- * sim emits `maxChosenTeamSize` (sim/battle.ts `getRequests`). Both are
+ * sim emits `maxChosenTeamSize` (sim/battle.ts `getRequests`). Same again for
+ * Z-moves: the type says `zMoves`, the sim emits `canZMove` (sim/pokemon.ts
+ * `getMoveRequestData`: `data.canZMove = canZMove`) - so reading `zMoves` here
+ * silently never matched and the Z-Move button could never appear. That went
+ * unnoticed until National Dex made Z-Crystals equippable at all. All three are
  * @pkmn/protocol type/reality mismatches, not something we got wrong; this
  * is where we read the real field names back out through a cast.
  */
@@ -42,6 +47,9 @@ interface RawRequestMove {
 }
 interface RawTeamRequest {
 	maxChosenTeamSize?: number;
+}
+interface RawActiveZMove {
+	canZMove?: ({ move: string; target: string } | null)[];
 }
 
 /**
@@ -135,11 +143,18 @@ function projectSideConditions(sideConditions: Record<string, { name: string; le
 
 function projectSlot(battle: Battle, p: Pokemon, visualMeta: VisualMetaMap): SlotView {
 	const hpPercent = p.maxhp > 0 ? Math.round((p.hp / p.maxhp) * 100) : 0;
+	// `p.species` is a dex lookup on speciesForme and is typed non-null, but it
+	// resolves to undefined for any species the dex's `exists` filter excludes
+	// (see seat.ts's permissiveExists). That filter is now permissive enough
+	// that this shouldn't happen - but this runs inside an async pump, so an
+	// unguarded throw here kills the whole server process and every other room
+	// on it. A missing sprite is a far better failure than that.
+	const species = p.species as typeof p.species | undefined;
 	return {
 		ident: p.ident,
 		speciesForme: p.speciesForme,
 		name: p.name || p.speciesForme,
-		spriteId: spriteIdFor(p.species.id, p.species.num, visualMeta),
+		spriteId: species ? spriteIdFor(species.id, species.num, visualMeta) : null,
 		shiny: p.shiny,
 		female: p.gender === 'F',
 		level: p.level,
@@ -204,7 +219,7 @@ function projectRequest(battle: Battle, request: Protocol.Request | undefined, v
 			if (active.canTerastallize) special.tera = { type: active.canTerastallize };
 			if (active.canMegaEvo) special.mega = true;
 			if (active.canDynamax) special.dynamax = true;
-			if (active.zMoves?.some(z => !!z)) special.zmove = true;
+			if ((active as unknown as RawActiveZMove).canZMove?.some(z => !!z)) special.zmove = true;
 		}
 	} else if (request.requestType === 'switch') {
 		forceSwitch = request.forceSwitch?.[0] ?? false;
@@ -283,4 +298,64 @@ export function cleanLogText(text: string): string[] {
 				.trim()
 		)
 		.filter(line => line.length > 0);
+}
+
+/** Maps a raw protocol command (`args[0]` from `Protocol.parseBattleLine`,
+ * e.g. `'-damage'`, `'switch'`, `'faint'`) to a coarse category for the log
+ * UI to color by. Deliberately keyed off the protocol event, not the
+ * formatted English sentence - text like "Pikachu used Thunderbolt!" vs
+ * "It's super effective!" both come from a `move` event's multi-line
+ * formatText output, so classifying by wording would be guesswork where
+ * classifying by the event that produced it isn't. */
+export function classifyLine(cmd: string): LogKind {
+	switch (cmd) {
+		case 'turn':
+			return 'turn';
+		case 'move':
+			return 'move';
+		case '-damage':
+			return 'damage';
+		case '-heal':
+		case '-sethp':
+			return 'heal';
+		case 'faint':
+			return 'faint';
+		case '-status':
+		case '-curestatus':
+		case '-cureteam':
+			return 'status';
+		case '-boost':
+		case '-unboost':
+		case '-setboost':
+		case '-clearboost':
+		case '-clearallboost':
+		case '-invertboost':
+		case '-clearpositiveboost':
+		case '-clearnegativeboost':
+		case '-swapboost':
+		case '-copyboost':
+			return 'boost';
+		case '-weather':
+		case '-fieldstart':
+		case '-fieldend':
+		case '-sidestart':
+		case '-sideend':
+			return 'weather';
+		case 'switch':
+		case 'drag':
+		case 'replace':
+		case 'swap':
+			return 'switch';
+		case '-ability':
+		case '-endability':
+			return 'ability';
+		case '-item':
+		case '-enditem':
+			return 'item';
+		case 'win':
+		case 'tie':
+			return 'win';
+		default:
+			return 'system';
+	}
 }

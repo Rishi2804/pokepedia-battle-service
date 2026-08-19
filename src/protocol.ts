@@ -1,5 +1,5 @@
 import type { PokemonSet } from '@pkmn/sim';
-import type { SupportedGen } from './formats.js';
+import type { BattleFormatKey } from './formats.js';
 
 export type SideID = 'p1' | 'p2';
 export type RoomPhase = 'waiting' | 'validating' | 'battle' | 'ended';
@@ -112,6 +112,18 @@ export interface RequestView {
 	};
 }
 
+/** Derived server-side from the raw protocol event (see view.ts's
+ * classifyLine), not sniffed from the formatted English text - the text
+ * alone doesn't reliably say what kind of event produced it. */
+export type LogKind =
+	| 'turn' | 'move' | 'damage' | 'heal' | 'faint' | 'status'
+	| 'boost' | 'weather' | 'switch' | 'ability' | 'item' | 'win' | 'system';
+
+export interface LogEntry {
+	text: string;
+	kind: LogKind;
+}
+
 export interface BattleView {
 	seat: SideID;
 	phase: BattlePhase;
@@ -137,7 +149,9 @@ export type Choice =
 	| { kind: 'undo' };
 
 export type ClientMessage =
-	| { t: 'create'; gen: SupportedGen; name: string; team: PokemonSet[]; visualMeta: VisualMetaMap }
+	// `formatKey` is what the room should play under (a gen, or 'nationaldex'),
+	// not the resolved Showdown format id - that comes back as `format` below.
+	| { t: 'create'; formatKey: BattleFormatKey; name: string; team: PokemonSet[]; visualMeta: VisualMetaMap }
 	| { t: 'join'; code: string; name: string; team: PokemonSet[]; visualMeta: VisualMetaMap }
 	| { t: 'resume'; code: string; seatToken: string }
 	| { t: 'choose'; rqid: number; choice: Choice }
@@ -153,13 +167,13 @@ export type ServerMessage =
 	| { t: 'created'; code: string; seat: SideID; seatToken: string; format: string }
 	| { t: 'joined'; code: string; seat: SideID; seatToken: string; format: string }
 	| { t: 'roomState'; phase: RoomPhase; players: Partial<Record<SideID, string>> }
-	| { t: 'update'; log: string[]; view: BattleView }
+	| { t: 'update'; log: LogEntry[]; view: BattleView }
 	/** Raw per-seat sim protocol lines, gated behind a dev flag. Not part of
 	 * the contract the UI renders against - for inspecting/replaying a
 	 * battle without a second protocol implementation. */
 	| { t: 'debug'; lines: string[] }
 	| { t: 'error'; code: ErrorCode; message: string; problems?: string[] }
-	| { t: 'end'; winner: SideID | 'tie' | null; view: BattleView };
+	| { t: 'end'; winner: SideID | 'tie' | null; log: LogEntry[]; view: BattleView };
 
 export type ErrorCode =
 	| 'invalid_message'
@@ -170,4 +184,5 @@ export type ErrorCode =
 	| 'team_invalid'
 	| 'not_your_turn'
 	| 'invalid_choice'
+	| 'rematch_unavailable'
 	| 'internal_error';

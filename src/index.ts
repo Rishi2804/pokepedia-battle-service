@@ -2,7 +2,7 @@ import { createServer, type Server } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import type { PokemonSet } from '@pkmn/sim';
 import { type RawData, WebSocketServer, type WebSocket } from 'ws';
-import { isSupportedGen } from './formats.js';
+import { isBattleFormatKey } from './formats.js';
 import type { Choice, ClientMessage, ErrorCode, ServerMessage, SideID, VisualMetaMap } from './protocol.js';
 import { Room, RoomRegistry } from './rooms.js';
 
@@ -111,7 +111,7 @@ export function createBattleServer(options: BattleServerOptions = {}): BattleSer
 				case 'create': {
 					if (room) return;
 					if (
-						!isSupportedGen(message.gen) ||
+						!isBattleFormatKey(message.formatKey) ||
 						typeof message.name !== 'string' ||
 						!isPokemonSetArray(message.team) ||
 						!isVisualMetaMap(message.visualMeta)
@@ -119,7 +119,7 @@ export function createBattleServer(options: BattleServerOptions = {}): BattleSer
 						sendError(ws, 'invalid_message', 'Invalid create payload.');
 						return;
 					}
-					const result = registry.create(message.gen, message.name, message.team, message.visualMeta, m => send(ws, m));
+					const result = registry.create(message.formatKey, message.name, message.team, message.visualMeta, m => send(ws, m));
 					if ('code' in result) {
 						sendError(ws, result.code, describeErrorCode(result.code), 'problems' in result ? result.problems : undefined);
 						return;
@@ -163,7 +163,8 @@ export function createBattleServer(options: BattleServerOptions = {}): BattleSer
 					}
 					room = result.room;
 					seat = result.side;
-					room.players[seat]!.seat.attach(m => send(ws, m));
+					room.attachTransport(seat, m => send(ws, m));
+					room.handleReconnect(seat);
 					room.broadcastRoomState();
 					break;
 				}
@@ -180,14 +181,22 @@ export function createBattleServer(options: BattleServerOptions = {}): BattleSer
 					break;
 				}
 				case 'leave': {
-					if (room && seat) room.players[seat]?.seat.detach();
+					if (room && seat) room.handleDisconnect(seat);
 					room = null;
 					seat = null;
 					break;
 				}
 				case 'rematch': {
-					// Rematch (new engine, same room) is Phase 6 scope.
-					sendError(ws, 'invalid_message', 'Rematch is not yet supported.');
+					if (!room) {
+						sendError(ws, 'not_your_turn', 'No active room.');
+						return;
+					}
+					const result = room.rematch();
+					if (!result.ok) {
+						sendError(ws, 'rematch_unavailable', result.reason);
+						return;
+					}
+					room.broadcastRoomState();
 					break;
 				}
 				default:
@@ -200,7 +209,7 @@ export function createBattleServer(options: BattleServerOptions = {}): BattleSer
 		});
 
 		ws.on('close', () => {
-			if (room && seat) room.players[seat]?.seat.detach();
+			if (room && seat) room.handleDisconnect(seat);
 		});
 	});
 

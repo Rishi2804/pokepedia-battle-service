@@ -5,10 +5,17 @@ export type ChoiceResolution = { ok: true; choiceString: string } | { ok: false;
 
 /** @pkmn/protocol's Request.ActivePokemon.moves[] type declares a `name`
  * field, but the sim actually emits `move` - same mismatch documented in
- * view.ts's RawRequestMove, verified against a live battle. */
+ * view.ts's RawRequestMove, verified against a live battle. The Z-move list
+ * is mistyped the same way: `zMoves` in the types, `canZMove` on the wire
+ * (sim/pokemon.ts `getMoveRequestData`). Reading `zMoves` here meant every
+ * Z-move choice was rejected as unavailable; it went unnoticed because no
+ * Z-Crystal was equippable until National Dex. */
 interface RawRequestMove {
 	move: string;
 	disabled?: boolean;
+}
+interface RawActiveZMove {
+	canZMove?: ({ move: string; target: string } | null)[];
 }
 
 /**
@@ -54,7 +61,8 @@ export function resolveChoice(battle: Battle, rqid: number, choice: Choice): Cho
 				choiceString += ' mega';
 			}
 			if (choice.zmove) {
-				if (!active.zMoves?.[choice.index - 1]) return { ok: false, message: 'Z-Move is not available for that move.' };
+				const zMoves = (active as unknown as RawActiveZMove).canZMove;
+				if (!zMoves?.[choice.index - 1]) return { ok: false, message: 'Z-Move is not available for that move.' };
 				choiceString += ' zmove';
 			}
 			if (choice.dynamax) {

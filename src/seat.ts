@@ -6,8 +6,8 @@ import { Dex } from '@pkmn/sim';
 import { LogFormatter } from '@pkmn/view';
 import { resolveChoice } from './choices.js';
 import type { PlayerStreams } from './engine.js';
-import type { Choice, ServerMessage, SideID, VisualMetaMap } from './protocol.js';
-import { cleanLogText, fixRequest, project } from './view.js';
+import type { Choice, LogEntry, ServerMessage, SideID, VisualMetaMap } from './protocol.js';
+import { classifyLine, cleanLogText, fixRequest, project } from './view.js';
 
 type StreamSide = PlayerStreams['p1'] | PlayerStreams['p2'];
 type Transport = (message: ServerMessage) => void;
@@ -21,7 +21,27 @@ type Transport = (message: ServerMessage) => void;
  * installed to provide a Dex implementation") but their type declarations
  * don't line up exactly (e.g. `gen: number` vs `gen: GenerationNum`) - cast
  * through the structural interface @pkmn/data actually expects. */
-const gens = new Generations(Dex as unknown as DexInterface);
+/**
+ * @pkmn/data's default `exists` filter (Generations.DEFAULT_EXISTS) drops
+ * anything flagged `isNonstandard` - Past, Future, LGPE, CAP - as well as
+ * anything tiered Illegal or Unreleased. National Dex AG deliberately
+ * re-legalises exactly those (Mega Stones and their formes, Z-Crystals, the
+ * Let's Go starters), so under the default filter `gen.species.get(...)`
+ * returns undefined for e.g. Pikachu-Starter or Clefable-Mega, and view.ts
+ * then throws on `p.species.id` - inside an async pump, which takes the whole
+ * server process down with every other room on it.
+ *
+ * Legality is already enforced by the real TeamValidator before a player is
+ * ever seated (teams.ts), so this dex only has to be able to *describe*
+ * anything the sim can put on the field. Keep the two structural checks from
+ * the default and drop the two legality ones.
+ */
+const permissiveExists = (d: { exists?: boolean; kind?: string; id?: string }): boolean => {
+	if (!d.exists) return false;
+	return !(d.kind === 'Ability' && d.id === 'noability');
+};
+
+const gens = new Generations(Dex as unknown as DexInterface, permissiveExists as never);
 
 /**
  * Raw per-seat sim protocol lines on a debug-only channel, for inspecting or
@@ -59,8 +79,15 @@ export class Seat {
 	private readonly formatter: LogFormatter;
 	private transport: Transport | null = null;
 	private stream: StreamSide | null = null;
-	private lastMessage: ServerMessage | null = null;
+	/** Narrowed to the two variants send() ever assigns it to - both carry a
+	 * `log` field, which attach() relies on when replaying with full history. */
+	private lastMessage: Extract<ServerMessage, { t: 'update' } | { t: 'end' }> | null = null;
 	private winner: SideID | 'tie' | null = null;
+	/** Every log entry this seat has ever produced, in order. `lastMessage`
+	 * only carries the most recent batch, which is enough to rehydrate the
+	 * view on resume but not the log - attach() replays this instead so a
+	 * reconnect doesn't lose earlier turns. */
+	private readonly logHistory: LogEntry[] = [];
 	/** `rqid` is normally added by the full PS server layer, not the raw sim
 	 * (sim/SIM-PROTOCOL.md: "It will not exist if you're using the simulator
 	 * directly through `import sim`" - confirmed empty in the raw request
@@ -92,7 +119,7 @@ export class Seat {
 	private processChunk(chunk: string, visualMeta: VisualMetaMap): void {
 		if (debugProtocolEnabled()) this.send({ t: 'debug', lines: chunk.split('\n').filter(Boolean) });
 
-		const log: string[] = [];
+		const log: LogEntry[] = [];
 		for (const line of chunk.split('\n')) {
 			if (!line) continue;
 
@@ -111,7 +138,10 @@ export class Seat {
 			// (see @pkmn/view's formatter.d.ts Tracker doc) - it needs the
 			// pre-update state to word things like "before" HP percentages.
 			const text = this.formatter.formatText(args, kwArgs);
-			if (text) log.push(...cleanLogText(text));
+			if (text) {
+				const kind = classifyLine(args[0]);
+				for (const cleaned of cleanLogText(text)) log.push({ text: cleaned, kind });
+			}
 			this.battle.add(args, kwArgs);
 
 			// |win|/|tie| are public broadcast lines, present on every seat's
@@ -125,17 +155,39 @@ export class Seat {
 			}
 		}
 
+		this.logHistory.push(...log);
+
 		const view = project(this.battle, this.seatId, this.format, this.winner, visualMeta);
 		if (this.winner !== null) {
-			this.send({ t: 'end', winner: this.winner, view });
+			this.send({ t: 'end', winner: this.winner, log, view });
 		} else {
 			this.send({ t: 'update', log, view });
 		}
 	}
 
+	/** On a fresh attach (join, or resume after a reconnect), replay the
+	 * last view together with the *full* log history rather than just the
+	 * last batch - a resumed client starts with an empty view, so it needs
+	 * everything up to now, not just what changed most recently. */
 	attach(transport: Transport): void {
 		this.transport = transport;
-		if (this.lastMessage) transport(this.lastMessage);
+		if (this.lastMessage) transport({ ...this.lastMessage, log: this.logHistory });
+	}
+
+	/** Ends the battle without a corresponding sim |win|/|tie| line - used
+	 * for forfeits (opponent disconnected past the grace window). Projects
+	 * this seat's already-frozen battle state (nothing further will ever
+	 * arrive on its stream) with an externally supplied winner, same as a
+	 * natural end. Guarded so a forfeit can never overwrite a battle that
+	 * already ended for real - Room only calls this while phase is still
+	 * 'battle', but the check is cheap insurance against re-ordering. */
+	forceEnd(winner: SideID | 'tie', visualMeta: VisualMetaMap, message: string): void {
+		if (this.winner !== null) return;
+		this.winner = winner;
+		const entry: LogEntry = { text: message, kind: 'system' };
+		this.logHistory.push(entry);
+		const view = project(this.battle, this.seatId, this.format, this.winner, visualMeta);
+		this.send({ t: 'end', winner: this.winner, log: [entry], view });
 	}
 
 	detach(): void {
