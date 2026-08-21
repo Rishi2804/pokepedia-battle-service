@@ -1,16 +1,13 @@
 /**
- * Anything Goes is only defined natively for gens 4, 6, 7, 8, 9
- * (pokemon-showdown/config/formats.ts). For the remaining gens we synthesize
- * it on top of that gen's Custom Game using the `@@@` custom-rules syntax:
- * "Standard AG" (data/rulesets.ts) gives Obtainable / Team Preview / HP
- * Percentage Mod / Cancel Mod / Endless Battle Clause, and we cap team/move
- * count and level the same way real AG does.
+ * AG is native only for gens 4/6/7/8/9 (pokemon-showdown/config/formats.ts);
+ * other gens synthesize it on that gen's Custom Game via `@@@` - "Standard AG"
+ * (data/rulesets.ts) gives Obtainable/Team Preview/HP% Mod/Cancel Mod/Endless
+ * Battle Clause, plus the same team/move/level caps as real AG.
  *
- * Repeal rules (`!Rule`) must omit the "= value" part - Showdown keys a
- * repeal by rule id only (sim/dex-formats.ts validateRule/getRuleTable), so
- * "!Max Team Size = 24" and "Max Team Size = 24" register under different
- * keys and the repeal silently fails to match. Verified against
- * @pkmn/sim 0.10.11 during implementation.
+ * Repeal rules (`!Rule`) must omit "= value" - Showdown keys a repeal by rule
+ * id only (sim/dex-formats.ts validateRule/getRuleTable), so
+ * "!Max Team Size = 24" silently fails to repeal "Max Team Size = 24"
+ * (verified against @pkmn/sim 0.10.11).
  */
 const NATIVE_AG_GENS = new Set([4, 6, 7, 8, 9]);
 
@@ -29,19 +26,15 @@ export type SupportedGen = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 export type BattleFormatKey = SupportedGen | 'nationaldex';
 
 /**
- * The Legends: Z-A Mega Stones. `@pkmn/sim` tags these `isNonstandard: 'Future'`
- * (unreleased), and National Dex AG only unbans `Past`, so each needs TWO
- * separate gates opened - neither works alone:
- *
+ * Legends: Z-A Mega Stones. `@pkmn/sim` tags these `isNonstandard: 'Future'`,
+ * but National Dex AG only unbans `Past`, so each needs both gates:
  *   +Future      unbans the mega *forme* (e.g. Clefable-Mega)
- *   +item:<id>   satisfies a second, hardcoded check inside NatDex Mod's own
- *                onValidateSet (pokemon-showdown/data/rulesets.ts), which walks
- *                an item back through gens 9->7 looking for a gen where it is
- *                standard - something a Future item can never satisfy. That
- *                block has an explicit `+item:` escape hatch; this is it.
- *
+ *   +item:<id>   satisfies NatDex Mod's onValidateSet (data/rulesets.ts),
+ *                which walks an item back through gens 9->7 looking for a
+ *                standard gen - a Future item can never satisfy that, so
+ *                this uses the check's explicit `+item:` escape hatch.
  * If a future @pkmn/sim bump retags these `Past`, the `+item:` unbans become
- * harmless no-ops rather than breaking, so this list can just be deleted then.
+ * harmless no-ops, so this list can just be deleted then.
  */
 const ZA_MEGA_STONE_IDS = [
 	'absolitez', 'barbaracite', 'baxcalibrite', 'chandelurite',
@@ -57,12 +50,12 @@ const ZA_MEGA_STONE_IDS = [
 ];
 
 /**
- * `+LGPE` clears the Let's Go tag on Pikachu-Starter / Eevee-Starter and their
- * exclusive moves (Zippy Zap, Splishy Splash, Floaty Fall). The two `+pokemon:`
- * unbans clear a *separate* NatDex Mod check that rejects any species with
- * `natDexTier === 'Illegal'` - it has its own `+pokemon:<id>` hatch, mirroring
- * the `+item:` one above. These two are the only real species affected; the
- * rest of that Illegal tier is Gmax formes, Pokestar props and CAP fakemon.
+ * `+LGPE` clears the Let's Go tag on Pikachu-Starter/Eevee-Starter and their
+ * exclusive moves (Zippy Zap, Splishy Splash, Floaty Fall). The `+pokemon:`
+ * unbans clear a *separate* NatDex Mod check rejecting
+ * `natDexTier === 'Illegal'` species, via the same kind of `+pokemon:<id>`
+ * hatch as `+item:` above. The rest of that Illegal tier is Gmax formes,
+ * Pokestar props and CAP fakemon - not real species.
  */
 const NATIONAL_DEX_FORMAT = [
 	'gen9nationaldexag@@@+Future',

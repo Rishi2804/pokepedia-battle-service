@@ -12,35 +12,34 @@ import { classifyLine, cleanLogText, fixRequest, project } from './view.js';
 type StreamSide = PlayerStreams['p1'] | PlayerStreams['p2'];
 type Transport = (message: ServerMessage) => void;
 
-/** Static dex data (species/moves/items/abilities tables) shared by every
- * Battle this process ever creates - constructing it is not cheap and it
- * has no per-battle mutable state, so one instance serves the whole server.
- *
- * @pkmn/sim's `Dex` is designed to interoperate with @pkmn/client/@pkmn/data
- * (per @pkmn/client's README: "either @pkmn/dex or @pkmn/sim must also be
- * installed to provide a Dex implementation") but their type declarations
- * don't line up exactly (e.g. `gen: number` vs `gen: GenerationNum`) - cast
- * through the structural interface @pkmn/data actually expects. */
 /**
- * @pkmn/data's default `exists` filter (Generations.DEFAULT_EXISTS) drops
- * anything flagged `isNonstandard` - Past, Future, LGPE, CAP - as well as
- * anything tiered Illegal or Unreleased. National Dex AG deliberately
- * re-legalises exactly those (Mega Stones and their formes, Z-Crystals, the
- * Let's Go starters), so under the default filter `gen.species.get(...)`
- * returns undefined for e.g. Pikachu-Starter or Clefable-Mega, and view.ts
- * then throws on `p.species.id` - inside an async pump, which takes the whole
- * server process down with every other room on it.
+ * @pkmn/data's default `exists` filter drops anything flagged
+ * `isNonstandard` (Past/Future/LGPE/CAP) or tiered Illegal/Unreleased.
+ * National Dex AG re-legalises exactly those (Mega Stones + formes,
+ * Z-Crystals, Let's Go starters), so under the default filter
+ * `gen.species.get(...)` returns undefined for e.g. Pikachu-Starter, and
+ * view.ts then throws on `p.species.id` - inside an async pump, taking the
+ * whole server process down with every other room on it.
  *
- * Legality is already enforced by the real TeamValidator before a player is
- * ever seated (teams.ts), so this dex only has to be able to *describe*
- * anything the sim can put on the field. Keep the two structural checks from
- * the default and drop the two legality ones.
+ * Legality is already enforced by TeamValidator before a player is seated
+ * (teams.ts), so this dex only needs to *describe* what the sim can put on
+ * the field - keep the two structural checks, drop the two legality ones.
  */
 const permissiveExists = (d: { exists?: boolean; kind?: string; id?: string }): boolean => {
 	if (!d.exists) return false;
 	return !(d.kind === 'Ability' && d.id === 'noability');
 };
 
+/**
+ * Static dex data (species/moves/items/abilities tables) shared by every
+ * Battle this process creates - expensive to construct and has no
+ * per-battle mutable state, so one instance serves the whole server.
+ *
+ * @pkmn/sim's `Dex` interoperates with @pkmn/client/@pkmn/data (per
+ * @pkmn/client's README, either @pkmn/dex or @pkmn/sim must supply a Dex
+ * implementation), but their types don't line up exactly (`gen: number` vs
+ * `GenerationNum`) - cast through the structural interface @pkmn/data expects.
+ */
 const gens = new Generations(Dex as unknown as DexInterface, permissiveExists as never);
 
 /**

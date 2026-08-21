@@ -3,13 +3,9 @@ import type { Choice } from './protocol.js';
 
 export type ChoiceResolution = { ok: true; choiceString: string } | { ok: false; message: string };
 
-/** @pkmn/protocol's Request.ActivePokemon.moves[] type declares a `name`
- * field, but the sim actually emits `move` - same mismatch documented in
- * view.ts's RawRequestMove, verified against a live battle. The Z-move list
- * is mistyped the same way: `zMoves` in the types, `canZMove` on the wire
- * (sim/pokemon.ts `getMoveRequestData`). Reading `zMoves` here meant every
- * Z-move choice was rejected as unavailable; it went unnoticed because no
- * Z-Crystal was equippable until National Dex. */
+/** Same @pkmn/protocol `move`/`zMoves` field-name mismatches as view.ts's
+ * RawRequestMove - reading `zMoves` here meant every Z-move choice was
+ * rejected as unavailable, unnoticed until Z-Crystals existed. */
 interface RawRequestMove {
 	move: string;
 	disabled?: boolean;

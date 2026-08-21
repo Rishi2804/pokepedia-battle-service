@@ -178,22 +178,18 @@ export class Room {
 	}
 
 	/**
-	 * Room-lifecycle-only win detection: sets phase to 'ended' (for
-	 * broadcastRoomState and GC eligibility) via the omniscient stream. The
-	 * actual per-seat `{t:'end', winner, view}` message is NOT sent from
-	 * here - each Seat detects |win|/|tie| independently from its own
-	 * stream and sends its own final view (see seat.ts). Duplicating that
-	 * trivial name-comparison is deliberate: this consumer and each seat's
-	 * pump are three independent async iterators over channels demuxed from
-	 * the same underlying stream, with no guaranteed ordering between them,
-	 * so this room-level watcher must not be the thing that triggers a
-	 * seat's projection - it could fire before that seat's own pump has
-	 * processed the very `|win|` chunk being projected.
+	 * Room-lifecycle-only win detection: sets phase to 'ended' via the
+	 * omniscient stream. The per-seat `{t:'end', winner, view}` message is
+	 * NOT sent from here - each Seat detects |win|/|tie| independently and
+	 * sends its own final view (seat.ts). This consumer and each seat's pump
+	 * are three independent async iterators over the same demuxed stream
+	 * with no guaranteed ordering, so this watcher must not trigger a seat's
+	 * projection - it could fire before that seat's pump processes the same
+	 * `|win|` chunk.
 	 *
 	 * |win|USERNAME / |tie| (PROTOCOL.md) identify the winner by name, not
-	 * by side - the sim protocol has no per-side "you won" line. If both
-	 * seats share a display name the winner can't be disambiguated here,
-	 * same as it can't be in the official client.
+	 * side - if both seats share a display name it can't be disambiguated
+	 * here, same as in the official client.
 	 */
 	private async watchForEnd(): Promise<void> {
 		if (!this.engine) return;

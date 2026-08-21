@@ -129,8 +129,6 @@ class Connection {
 	}
 }
 
-// ---- rendering ----
-
 function hpBar(percent: number): string {
 	const width = 20;
 	const filled = Math.max(0, Math.min(width, Math.round((percent / 100) * width)));
@@ -194,8 +192,6 @@ function renderView(view: BattleView): void {
 	console.log(renderBench(view.me));
 	console.log('='.repeat(60));
 }
-
-// ---- interactive choice prompting ----
 
 const rl = createInterface({ input: process.stdin, output: process.stdout });
 
@@ -262,8 +258,6 @@ async function promptChoice(view: BattleView): Promise<Choice | null> {
 	};
 }
 
-// ---- an in-process random bot, for the default "just let me play" mode ----
-
 async function runBot(connection: Connection, formatKey: BattleFormatKey, code: string): Promise<void> {
 	const team = legalTeamFor(formatKey);
 	connection.send({ t: 'join', code, name: 'Bot', team, visualMeta: {} });
@@ -291,8 +285,6 @@ async function runBot(connection: Connection, formatKey: BattleFormatKey, code: 
 		if (choice) connection.send({ t: 'choose', rqid: req.rqid, choice });
 	}
 }
-
-// ---- main ----
 
 async function playAsHuman(connection: Connection): Promise<void> {
 	let respondedRqid: number | null = null;

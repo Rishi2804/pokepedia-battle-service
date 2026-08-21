@@ -26,17 +26,17 @@ function toId(text: string): string {
 }
 
 /**
- * @pkmn/protocol's `Request.ActivePokemon.moves[]` type declares a `name`
- * field, but the sim actually emits `move` (pokemon-showdown sim/pokemon.ts
- * `getMoveRequestData`: `move: move.name`) - verified against a live battle
- * during implementation. Likewise `TeamRequest` types `maxTeamSize`, but the
- * sim emits `maxChosenTeamSize` (sim/battle.ts `getRequests`). Same again for
- * Z-moves: the type says `zMoves`, the sim emits `canZMove` (sim/pokemon.ts
- * `getMoveRequestData`: `data.canZMove = canZMove`) - so reading `zMoves` here
- * silently never matched and the Z-Move button could never appear. That went
- * unnoticed until National Dex made Z-Crystals equippable at all. All three are
- * @pkmn/protocol type/reality mismatches, not something we got wrong; this
- * is where we read the real field names back out through a cast.
+ * Three @pkmn/protocol type/reality mismatches, verified against a live
+ * battle - the sim emits different field names than the types declare, so
+ * we read the real names back out through a cast:
+ *   - `Request.ActivePokemon.moves[]` types `name`, sim emits `move`
+ *     (sim/pokemon.ts `getMoveRequestData`: `move: move.name`)
+ *   - `TeamRequest` types `maxTeamSize`, sim emits `maxChosenTeamSize`
+ *     (sim/battle.ts `getRequests`)
+ *   - Z-moves: types say `zMoves`, sim emits `canZMove` (sim/pokemon.ts
+ *     `getMoveRequestData`: `data.canZMove = canZMove`) - so reading `zMoves`
+ *     silently never matched and the Z-Move button could never appear, unnoticed
+ *     until National Dex made Z-Crystals equippable at all.
  */
 interface RawRequestMove {
 	move: string;
@@ -100,17 +100,13 @@ function optionalNamed(effect: { id: string; name: string }): Named | null {
 }
 
 /**
- * `@pkmn/client`'s Handler resolves an item revealed via a `[from] item: X`
- * kwarg (e.g. Life Orb recoil) by looking it up in the generic "conditions"
- * table (`battle.get('conditions', kwArgs.from)`), which correctly returns
- * `kind: 'Item'` but with the item's *namespaced* effect id
- * (`"item:lifeorb"`, not `"lifeorb"`) - and then assigns that whole string
- * to `Pokemon.item`. Looking that back up in the real items table then
- * fails and falls back to displaying the raw id. Verified against a live
- * battle during implementation (a Life Orb revealed via recoil rendered as
+ * `@pkmn/client`'s Handler resolves an item revealed via `[from] item: X`
+ * (e.g. Life Orb recoil) through the generic "conditions" table
+ * (`battle.get('conditions', kwArgs.from)`), which returns `kind: 'Item'`
+ * but the *namespaced* id (`"item:lifeorb"`, not `"lifeorb"`) and assigns it
+ * straight to `Pokemon.item` - verified live (Life Orb rendered as
  * "item:lifeorb"). Stripped defensively wherever an id is read back out,
- * since the same "conditions" fallback pattern could plausibly leak into
- * other fields (ability) the same way.
+ * since the same fallback could leak into other fields (ability) too.
  */
 function stripEffectNamespace(id: string | undefined | null): string {
 	if (!id) return '';
@@ -270,22 +266,17 @@ export function project(
 }
 
 /**
- * Cleans @pkmn/view's LogFormatter output for plain-text rendering: `**X**`
- * bold markers are markdown for a UI we don't have, and `||exact||percent||`
- * is a spectator-log spoiler-tooltip convention (see LogFormatter.formatHTML)
- * that doesn't apply to a private per-seat log - both are stripped down to
- * their plain visible form. A single formatted block can contain several
- * newline-joined sentences (e.g. a move line plus its effectiveness line),
- * which become separate log entries.
+ * Cleans @pkmn/view's LogFormatter output for plain text: `**X**` bold
+ * markers (markdown, no UI for it) and `||exact||percent||` spoiler-tooltip
+ * syntax (LogFormatter.formatHTML, spectator-log only) are stripped to their
+ * plain form. A formatted block's newline-joined sentences (e.g. a move line
+ * plus its effectiveness line) become separate log entries.
  *
- * Also strips a stray literal "undefined" - some of LogFormatter's generic
- * templates (e.g. the `-end` fallback "[POKEMON] was freed from [EFFECT]!")
- * don't have a specific display-name entry for every effect they can be
- * asked to name (verified live: Kingambit's numbered "Fallen" volatile
- * renders as "freed from fallenundefined!"). This is an upstream
- * @pkmn/view gap, not a state bug - the underlying BattleView stays
- * correct - so it's cleaned here as a general safety net rather than
- * chased into that template table for one obscure effect.
+ * Also strips a stray literal "undefined": some LogFormatter templates (the
+ * `-end` fallback "[POKEMON] was freed from [EFFECT]!") lack a display-name
+ * entry for every effect they can name - verified live (Kingambit's "Fallen"
+ * volatile renders as "freed from fallenundefined!"). Upstream @pkmn/view
+ * gap, not a state bug, so cleaned here rather than chased into that table.
  */
 export function cleanLogText(text: string): string[] {
 	return text

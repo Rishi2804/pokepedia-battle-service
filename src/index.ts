@@ -228,11 +228,10 @@ export function createBattleServer(options: BattleServerOptions = {}): BattleSer
 	};
 }
 
-// process.argv[1] is whatever path was typed on the command line (often
-// relative, e.g. "src/index.ts" from `npm start`), while import.meta.url is
-// always an absolute file:// URL - comparing them directly would never
-// match under a relative invocation and this module would silently do
-// nothing. pathToFileURL resolves argv[1] against cwd first.
+// process.argv[1] can be relative (e.g. "src/index.ts" from `npm start`)
+// while import.meta.url is always an absolute file:// URL - comparing them
+// directly would silently never match, so pathToFileURL resolves argv[1]
+// against cwd first.
 const isMain = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
 	const allowedOrigins = (process.env.BATTLE_ALLOWED_ORIGINS ?? '')

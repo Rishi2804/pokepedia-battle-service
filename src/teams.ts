@@ -18,7 +18,6 @@ export function validateTeam(formatId: string, team: PokemonSet[]): TeamValidati
 	}
 }
 
-// Packs a team for the `>player` sim-protocol line
 export function packTeam(team: PokemonSet[]): string {
 	return Teams.pack(team);
 }
