@@ -69,7 +69,9 @@ export function fixRequest(request: any, protocol: typeof Protocol): Protocol.Re
 	}
 	if (request.side) {
 		for (const p of request.side.pokemon) {
-			protocol.parseDetails(p.ident.slice(4), p.ident, p.details, p);
+			const teraSuffix = p.terastallized ? `, tera:${p.terastallized}` : '';
+			const details = teraSuffix && !p.details.endsWith(teraSuffix) ? p.details + teraSuffix : p.details;
+			protocol.parseDetails(p.ident.slice(4), p.ident, details, p);
 			protocol.parseHealth(p.condition, p);
 		}
 	}
