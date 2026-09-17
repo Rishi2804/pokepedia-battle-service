@@ -225,13 +225,23 @@ function projectRequest(battle: Battle, request: Protocol.Request | undefined, v
 		teamPreviewSize = (request as unknown as RawTeamRequest).maxChosenTeamSize;
 	}
 
-	const canSwitch: RequestSwitchView[] = (request.side?.pokemon ?? []).map((p: any, i) => ({
-		index: i + 1,
-		name: p.name as string,
-		spriteId: spriteIdFor(toId(p.speciesForme as string), undefined, visualMeta),
-		fainted: !!p.fainted,
-		active: !!p.active,
-	}));
+	// species.num rather than the literal undefined this used to pass -
+	// visualMeta is keyed by the team-build species (e.g. "charizard"), which
+	// a mid-battle Mega/forme change won't match, so without a dex-number
+	// fallback here a Mega'd Pokemon's switch icon silently comes back null.
+	const canSwitch: RequestSwitchView[] = (request.side?.pokemon ?? []).map((p: any, i) => {
+		const species = battle.gen.species.get(p.speciesForme as string);
+		return {
+			index: i + 1,
+			name: p.name as string,
+			speciesForme: p.speciesForme as string,
+			spriteId: spriteIdFor(species?.id ?? toId(p.speciesForme as string), species?.num, visualMeta),
+			shiny: !!p.shiny,
+			female: p.gender === 'F',
+			fainted: !!p.fainted,
+			active: !!p.active,
+		};
+	});
 
 	// The wire's requestType is 'team' for team preview; the public
 	// RequestView.kind spells it out as 'teampreview' for clarity.
