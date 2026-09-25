@@ -23,7 +23,7 @@ export type SupportedGen = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
  * Pokemon from every gen, with Mega Evolution, Z-Moves and Terastallization
  * all available at once.
  */
-export type BattleFormatKey = SupportedGen | 'nationaldex';
+export type BattleFormatKey = SupportedGen | 'nationaldex' | 'legendsza';
 
 /**
  * Legends: Z-A Mega Stones. `@pkmn/sim` tags these `isNonstandard: 'Future'`,
@@ -65,16 +65,39 @@ const NATIONAL_DEX_FORMAT = [
 	...ZA_MEGA_STONE_IDS.map(id => `+item:${id}`),
 ].join(',');
 
+/**
+ * Legends: Z-A plays as plain gen9anythinggoes today - SV-only species,
+ * Terastallize legal, Mega Evolution absent, which is backwards for a game
+ * whose whole mechanic *is* Mega Evolution. National Dex AG's base fixes the
+ * species axis (Z-A reintroduces non-SV Pokemon like Pumpkaboo/Buneary/
+ * Watchog); the rest is Z-A-specific:
+ *   Terastal Clause   Z-A has no Tera - nulls canTerastallize (data/rulesets.ts)
+ *   !Obtainable Moves  disables learnset legality entirely. The team builder
+ *                      is the actual source of truth here (DB-backed, only
+ *                      offers moves from the real Z-A learnset), so this
+ *                      trades a redundant sim-side check for not rejecting
+ *                      legitimate Z-A sets that use Z-A-exclusive learnsets
+ *                      the SV move data doesn't know about.
+ * `+LGPE`/starter unbans aren't needed - Z-A's own dex doesn't offer them.
+ */
+const LEGENDS_ZA_FORMAT = [
+	'gen9nationaldexag@@@+Future',
+	'Terastal Clause',
+	'!Obtainable Moves',
+	...ZA_MEGA_STONE_IDS.map(id => `+item:${id}`),
+].join(',');
+
 export function isSupportedGen(gen: number): gen is SupportedGen {
 	return Number.isInteger(gen) && gen >= 1 && gen <= 9;
 }
 
 export function isBattleFormatKey(key: unknown): key is BattleFormatKey {
-	return key === 'nationaldex' || (typeof key === 'number' && isSupportedGen(key));
+	return key === 'nationaldex' || key === 'legendsza' || (typeof key === 'number' && isSupportedGen(key));
 }
 
 export function formatFor(key: BattleFormatKey): string {
 	if (key === 'nationaldex') return NATIONAL_DEX_FORMAT;
+	if (key === 'legendsza') return LEGENDS_ZA_FORMAT;
 	if (NATIVE_AG_GENS.has(key)) return `gen${key}anythinggoes`;
 	return `gen${key}customgame${SYNTHESIZED_AG_SUFFIX}`;
 }
