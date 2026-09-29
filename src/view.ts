@@ -200,6 +200,7 @@ function projectRequest(battle: Battle, request: Protocol.Request | undefined, v
 	if (request.requestType === 'move') {
 		const active = request.active[0];
 		if (active) {
+			const zMoves = (active as unknown as RawActiveZMove).canZMove;
 			(active.moves as unknown as RawRequestMove[]).forEach((m, i) => {
 				const data = battle.get('moves', m.id);
 				moves.push({
@@ -211,13 +212,14 @@ function projectRequest(battle: Battle, request: Protocol.Request | undefined, v
 					pp: m.pp ?? 0,
 					maxpp: m.maxpp ?? 0,
 					disabled: !!m.disabled,
+					zMove: zMoves?.[i]?.move ?? null,
 				});
 			});
 			trapped = !!active.trapped;
 			if (active.canTerastallize) special.tera = { type: active.canTerastallize };
 			if (active.canMegaEvo) special.mega = true;
 			if (active.canDynamax) special.dynamax = true;
-			if ((active as unknown as RawActiveZMove).canZMove?.some(z => !!z)) special.zmove = true;
+			if (zMoves?.some(z => !!z)) special.zmove = true;
 		}
 	} else if (request.requestType === 'switch') {
 		forceSwitch = request.forceSwitch?.[0] ?? false;

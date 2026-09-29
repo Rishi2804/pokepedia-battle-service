@@ -86,6 +86,8 @@ export interface RequestMoveView {
 	pp: number;
 	maxpp: number;
 	disabled: boolean;
+	/** Z-Move name this move becomes with the active Z-Crystal; null if it can't be Z-powered. */
+	zMove: string | null;
 }
 
 export interface RequestSwitchView {
