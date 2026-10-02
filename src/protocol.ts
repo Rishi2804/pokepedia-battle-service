@@ -66,6 +66,8 @@ export type BoostID = 'atk' | 'def' | 'spa' | 'spd' | 'spe' | 'accuracy' | 'evas
 export interface ActiveView extends SlotView {
 	boosts: Partial<Record<BoostID, number>>;
 	volatiles: Named[];
+	/** 'gigantamax' only for a Gmax-capable Pokemon that actually Gigantamaxed. */
+	dynamax: 'dynamax' | 'gigantamax' | null;
 }
 
 export interface SideView {
@@ -88,6 +90,9 @@ export interface RequestMoveView {
 	disabled: boolean;
 	/** Z-Move name this move becomes with the active Z-Crystal; null if it can't be Z-powered. */
 	zMove: string | null;
+	/** Max Move this move becomes while Dynamaxed (G-Max Move if the Pokemon Gigantamaxes);
+	 * null if the request carries no max-move data. */
+	maxMove: { name: string; type: string; disabled: boolean } | null;
 }
 
 export interface RequestSwitchView {
@@ -114,6 +119,10 @@ export interface RequestView {
 		mega?: boolean;
 		zmove?: boolean;
 		dynamax?: boolean;
+		/** Dynamax toggle should read "Gigantamax" - this Pokemon will Gmax. */
+		gigantamax?: boolean;
+		/** Already Dynamaxed: the moves on offer are the Max Moves, no toggle needed. */
+		dynamaxed?: boolean;
 	};
 }
 
