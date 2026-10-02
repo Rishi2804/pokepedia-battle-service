@@ -13,6 +13,9 @@ interface RawRequestMove {
 interface RawActiveZMove {
 	canZMove?: ({ move: string; target: string } | null)[];
 }
+interface RawActiveMaxMoves {
+	maxMoves?: { maxMoves: { move: string; disabled?: boolean }[] };
+}
 
 /**
  * Turns a structured client Choice into the real sim choice string
@@ -45,7 +48,16 @@ export function resolveChoice(battle: Battle, rqid: number, choice: Choice): Cho
 			if (!active) return { ok: false, message: 'No active Pokemon to move with.' };
 			const move = active.moves[choice.index - 1] as unknown as RawRequestMove | undefined;
 			if (!move) return { ok: false, message: `No move at index ${choice.index}.` };
-			if (move.disabled) return { ok: false, message: `${move.move} is disabled.` };
+			// Already Dynamaxed (maxMoves present, canDynamax gone): the sim picks the
+			// Max Move itself, so only its own disabled flag (e.g. no usable Max Move) applies.
+			const maxMoves = (active as unknown as RawActiveMaxMoves).maxMoves?.maxMoves;
+			const dynamaxed = !!maxMoves && !active.canDynamax;
+			const maxMove = maxMoves?.[choice.index - 1];
+			if ((choice.dynamax || dynamaxed) && maxMove) {
+				if (maxMove.disabled) return { ok: false, message: `That Max Move is disabled.` };
+			} else if (move.disabled) {
+				return { ok: false, message: `${move.move} is disabled.` };
+			}
 
 			let choiceString = `move ${choice.index}`;
 			if (choice.tera) {

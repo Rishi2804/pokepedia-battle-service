@@ -51,6 +51,16 @@ interface RawTeamRequest {
 interface RawActiveZMove {
 	canZMove?: ({ move: string; target: string } | null)[];
 }
+/**
+ * Dynamax: types say `maxMoves` is a flat array, sim emits
+ * `{ maxMoves: [...], gigantamax?: <G-Max move id> }` (sim/pokemon.ts
+ * `getDynamaxRequest`) - present while Dynamax is available and for the
+ * whole time the Pokemon is Dynamaxed. G-Max Move ids are already
+ * substituted in, indexed like `moves`.
+ */
+interface RawActiveMaxMoves {
+	maxMoves?: { maxMoves: { move: string; target: string; disabled?: boolean }[]; gigantamax?: string };
+}
 
 /**
  * The raw sim `|request|` JSON has neither a `requestType` discriminant nor
@@ -203,8 +213,11 @@ function projectRequest(battle: Battle, request: Protocol.Request | undefined, v
 		const active = request.active[0];
 		if (active) {
 			const zMoves = (active as unknown as RawActiveZMove).canZMove;
+			const maxMoves = (active as unknown as RawActiveMaxMoves).maxMoves;
 			(active.moves as unknown as RawRequestMove[]).forEach((m, i) => {
 				const data = battle.get('moves', m.id);
+				const rawMax = maxMoves?.maxMoves[i];
+				const maxMove = rawMax ? battle.get('moves', rawMax.move) : null;
 				moves.push({
 					index: i + 1,
 					id: m.id,
@@ -215,12 +228,15 @@ function projectRequest(battle: Battle, request: Protocol.Request | undefined, v
 					maxpp: m.maxpp ?? 0,
 					disabled: !!m.disabled,
 					zMove: zMoves?.[i]?.move ?? null,
+					maxMove: maxMove ? { name: maxMove.name, type: 'type' in maxMove ? (maxMove.type as string) : '', disabled: !!maxMoves!.maxMoves[i].disabled } : null,
 				});
 			});
 			trapped = !!active.trapped;
 			if (active.canTerastallize) special.tera = { type: active.canTerastallize };
 			if (active.canMegaEvo) special.mega = true;
 			if (active.canDynamax) special.dynamax = true;
+			if (maxMoves?.gigantamax) special.gigantamax = true;
+			if (maxMoves && !active.canDynamax) special.dynamaxed = true;
 			if (zMoves?.some(z => !!z)) special.zmove = true;
 		}
 	} else if (request.requestType === 'switch') {
