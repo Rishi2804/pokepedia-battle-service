@@ -171,8 +171,10 @@ function projectSlot(battle: Battle, p: Pokemon, visualMeta: VisualMetaMap): Slo
 }
 
 function projectActive(battle: Battle, p: Pokemon, visualMeta: VisualMetaMap): ActiveView {
+	const dynamax = p.volatiles.dynamax as { gmax?: boolean } | undefined;
 	return {
 		...projectSlot(battle, p, visualMeta),
+		dynamax: dynamax ? (dynamax.gmax ? 'gigantamax' : 'dynamax') : null,
 		boosts: p.boosts,
 		volatiles: Object.keys(p.volatiles).map(id => optionalNamed(battle.get('conditions', id))).filter((n): n is Named => n !== null),
 	};

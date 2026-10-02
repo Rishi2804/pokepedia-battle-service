@@ -143,6 +143,16 @@ export class Seat {
 			}
 			this.battle.add(args, kwArgs);
 
+			// @pkmn/client's `-start|Dynamax` handler drops the trailing 'Gmax'
+			// arg (it only passes `{}` vs undefined to addVolatile), so a
+			// Gigantamaxed Pokemon is indistinguishable from a Dynamaxed one on
+			// the client's state. Tag the volatile ourselves - it then clears
+			// with the volatile on `-end`/switch-out, with nothing to keep in sync.
+			if (args[0] === '-start' && args[2] === 'Dynamax' && args[3] === 'Gmax') {
+				const dynamax = this.battle.getPokemon(args[1])?.volatiles.dynamax as { gmax?: boolean } | undefined;
+				if (dynamax) dynamax.gmax = true;
+			}
+
 			// |win|/|tie| are public broadcast lines, present on every seat's
 			// own channel - each seat can determine the winner from its own
 			// stream without any cross-seat coordination.

@@ -66,6 +66,8 @@ export type BoostID = 'atk' | 'def' | 'spa' | 'spd' | 'spe' | 'accuracy' | 'evas
 export interface ActiveView extends SlotView {
 	boosts: Partial<Record<BoostID, number>>;
 	volatiles: Named[];
+	/** 'gigantamax' only for a Gmax-capable Pokemon that actually Gigantamaxed. */
+	dynamax: 'dynamax' | 'gigantamax' | null;
 }
 
 export interface SideView {
