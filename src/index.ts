@@ -2,7 +2,7 @@ import { createServer, type Server } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import type { PokemonSet } from '@pkmn/sim';
 import { type RawData, WebSocketServer, type WebSocket } from 'ws';
-import { type BattleFormatKey, isBattleFormatKey } from './formats.js';
+import type { BattleFormatKey } from './formats.js';
 import type { BattleTeamMember, Choice, ClientMessage, ErrorCode, ServerMessage, SideID, StatSpread, VisualMetaMap } from './protocol.js';
 import { Room, RoomRegistry } from './rooms.js';
 import { convertTeam } from './teamConvert.js';
@@ -45,14 +45,6 @@ function describeErrorCode(code: string): string {
 	}
 }
 
-function isPokemonSetArray(value: unknown): value is PokemonSet[] {
-	return Array.isArray(value);
-}
-
-function isVisualMetaMap(value: unknown): value is VisualMetaMap {
-	return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 const MAX_TEAM_MEMBERS = 24;
 const GENDERS = ['male', 'female', 'genderless'];
 
@@ -92,30 +84,23 @@ function isBattleTeam(value: unknown): value is BattleTeamMember[] {
 }
 
 type ResolvedTeam =
-	| { ok: true; formatKey: BattleFormatKey | null; team: PokemonSet[]; visualMeta: VisualMetaMap }
+	| { ok: true; formatKey: BattleFormatKey; team: PokemonSet[]; visualMeta: VisualMetaMap }
 	| { ok: false; code: ErrorCode; message: string; problems?: string[] };
 
-/** Normalizes a create/join payload into Showdown sets + sprite metadata.
- * Native payloads (`versionGroup`) are converted here; legacy payloads
- * already carry sets. `formatKey` is null for a legacy join, which plays
- * whatever format the room was created with. */
+/** Validates a create/join payload and converts its PokePedia team into
+ * Showdown sets + sprite metadata. The format comes from the team's version
+ * group (src/versionRules.ts), never from the client. */
 function resolveTeam(message: Extract<ClientMessage, { t: 'create' | 'join' }>): ResolvedTeam {
-	if ('versionGroup' in message) {
-		if ((message.versionGroup !== null && !isVersionGroup(message.versionGroup)) || !isBattleTeam(message.team)) {
-			return { ok: false, code: 'invalid_message', message: `Invalid ${message.t} payload.` };
-		}
-		try {
-			const converted = convertTeam(message.team, message.versionGroup);
-			if (!converted.ok) return { ok: false, code: 'team_invalid', message: describeErrorCode('team_invalid'), problems: converted.problems };
-			return { ok: true, formatKey: converted.rules.formatKey, team: converted.team, visualMeta: converted.visualMeta };
-		} catch (err) {
-			return { ok: false, code: 'team_invalid', message: describeErrorCode('team_invalid'), problems: [err instanceof Error ? err.message : String(err)] };
-		}
-	}
-	if (!isPokemonSetArray(message.team) || !isVisualMetaMap(message.visualMeta)) {
+	if ((message.versionGroup !== null && !isVersionGroup(message.versionGroup)) || !isBattleTeam(message.team)) {
 		return { ok: false, code: 'invalid_message', message: `Invalid ${message.t} payload.` };
 	}
-	return { ok: true, formatKey: 'formatKey' in message ? message.formatKey : null, team: message.team, visualMeta: message.visualMeta };
+	try {
+		const converted = convertTeam(message.team, message.versionGroup);
+		if (!converted.ok) return { ok: false, code: 'team_invalid', message: describeErrorCode('team_invalid'), problems: converted.problems };
+		return { ok: true, formatKey: converted.rules.formatKey, team: converted.team, visualMeta: converted.visualMeta };
+	} catch (err) {
+		return { ok: false, code: 'team_invalid', message: describeErrorCode('team_invalid'), problems: [err instanceof Error ? err.message : String(err)] };
+	}
 }
 
 function isChoice(value: unknown): value is Choice {
@@ -184,10 +169,6 @@ export function createBattleServer(options: BattleServerOptions = {}): BattleSer
 					const resolved = resolveTeam(message);
 					if (!resolved.ok) {
 						sendError(ws, resolved.code, resolved.message, resolved.problems);
-						return;
-					}
-					if (!isBattleFormatKey(resolved.formatKey)) {
-						sendError(ws, 'invalid_message', 'Invalid create payload.');
 						return;
 					}
 					const result = registry.create(resolved.formatKey, message.name, resolved.team, resolved.visualMeta, m => send(ws, m));
