@@ -20,6 +20,7 @@ import { Dex, Teams, TeamValidator, type PokemonSet } from '@pkmn/sim';
 import { TeamGenerators } from '@pkmn/randoms';
 import WebSocket from 'ws';
 import { type BattleFormatKey, formatFor, isBattleFormatKey } from '../src/formats.js';
+import { toNativeTeam } from './nativeTeam.js';
 import type {
 	ActiveView,
 	BattleView,
@@ -172,7 +173,7 @@ function renderBench(side: SideView): string {
 
 function renderView(view: BattleView): void {
 	console.log('\n' + '='.repeat(60));
-	console.log(`Turn ${view.turn} | ${view.format} | Gen ${view.gen} | Phase: ${view.phase}`);
+	console.log(`Turn ${view.turn} | ${view.formatName} | Gen ${view.gen} | Phase: ${view.phase}`);
 	if (view.field.weather || view.field.terrain || view.field.pseudoWeather.length) {
 		const parts = [
 			view.field.weather?.name,
@@ -260,7 +261,7 @@ async function promptChoice(view: BattleView): Promise<Choice | null> {
 
 async function runBot(connection: Connection, formatKey: BattleFormatKey, code: string): Promise<void> {
 	const team = legalTeamFor(formatKey);
-	connection.send({ t: 'join', code, name: 'Bot', team, visualMeta: {} });
+	connection.send({ t: 'join', code, name: 'Bot', ...toNativeTeam(formatKey, team) });
 	await connection.waitFor('joined');
 
 	let respondedRqid: number | null = null;
@@ -330,13 +331,13 @@ async function main(): Promise<void> {
 	const team = legalTeamFor(args.formatKey);
 
 	if (args.mode === 'join') {
-		connection.send({ t: 'join', code: args.joinCode!, name: 'Player', team, visualMeta: {} });
+		connection.send({ t: 'join', code: args.joinCode!, name: 'Player', ...toNativeTeam(args.formatKey, team) });
 		const joined = await connection.waitFor('joined');
 		console.log(`Joined room ${joined.code} as ${joined.seat}.`);
 	} else {
-		connection.send({ t: 'create', formatKey: args.formatKey, name: 'Player', team, visualMeta: {} });
+		connection.send({ t: 'create', name: 'Player', ...toNativeTeam(args.formatKey, team) });
 		const created = await connection.waitFor('created');
-		console.log(`Created room ${created.code} as ${created.seat} (${created.format}).`);
+		console.log(`Created room ${created.code} as ${created.seat} (${created.formatName}).`);
 
 		if (args.mode === 'vs-bot') {
 			const bot = new Connection(args.wsUrl);

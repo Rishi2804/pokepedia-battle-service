@@ -2,9 +2,12 @@ import { createServer, type Server } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import type { PokemonSet } from '@pkmn/sim';
 import { type RawData, WebSocketServer, type WebSocket } from 'ws';
-import { isBattleFormatKey } from './formats.js';
-import type { Choice, ClientMessage, ErrorCode, ServerMessage, SideID, VisualMetaMap } from './protocol.js';
+import type { BattleFormatKey } from './formats.js';
+import type { BattleTeamMember, Choice, ClientMessage, ErrorCode, ServerMessage, SideID, StatSpread, VisualMetaMap } from './protocol.js';
+import { loadHomeIds } from './homeIds.js';
 import { Room, RoomRegistry } from './rooms.js';
+import { convertTeam } from './teamConvert.js';
+import { isVersionGroup, type VersionGroup } from './versionRules.js';
 
 const DEFAULT_PORT = Number(process.env.PORT ?? 3001);
 const SWEEP_INTERVAL_MS = 60_000;
@@ -34,6 +37,8 @@ function describeErrorCode(code: string): string {
 			return 'No battle room with that code.';
 		case 'room_full':
 			return 'That battle room already has two players.';
+		case 'gen_mismatch':
+			return "This room was created with a team from a different game - pick a team from the room's game to join.";
 		case 'team_invalid':
 			return 'Team failed validation for this format.';
 		case 'invalid_seat_token':
@@ -43,12 +48,62 @@ function describeErrorCode(code: string): string {
 	}
 }
 
-function isPokemonSetArray(value: unknown): value is PokemonSet[] {
-	return Array.isArray(value);
+const MAX_TEAM_MEMBERS = 24;
+const GENDERS = ['male', 'female', 'genderless'];
+
+function isStatSpread(value: unknown): value is StatSpread {
+	if (typeof value !== 'object' || value === null) return false;
+	const v = value as Record<string, unknown>;
+	return ['hp', 'atk', 'def', 'spa', 'spd', 'spe'].every(stat => typeof v[stat] === 'number');
 }
 
-function isVisualMetaMap(value: unknown): value is VisualMetaMap {
-	return typeof value === 'object' && value !== null && !Array.isArray(value);
+const isNullableString = (value: unknown): value is string | null => value === null || typeof value === 'string';
+
+function isBattleTeamMember(value: unknown): value is BattleTeamMember {
+	if (typeof value !== 'object' || value === null) return false;
+	const v = value as Record<string, unknown>;
+	return (
+		typeof v.pokemonId === 'number' &&
+		typeof v.slug === 'string' &&
+		isNullableString(v.nickname) &&
+		typeof v.shiny === 'boolean' &&
+		typeof v.gender === 'string' && GENDERS.includes(v.gender) &&
+		isNullableString(v.ability) &&
+		Array.isArray(v.moves) && v.moves.every(m => typeof m === 'string') &&
+		typeof v.level === 'number' &&
+		typeof v.nature === 'string' &&
+		isNullableString(v.item) &&
+		isStatSpread(v.evs) &&
+		isStatSpread(v.ivs) &&
+		typeof v.happiness === 'number' &&
+		isNullableString(v.teraType) &&
+		typeof v.dynamaxLevel === 'number' &&
+		typeof v.gigantamax === 'boolean'
+	);
+}
+
+function isBattleTeam(value: unknown): value is BattleTeamMember[] {
+	return Array.isArray(value) && value.length <= MAX_TEAM_MEMBERS && value.every(isBattleTeamMember);
+}
+
+type ResolvedTeam =
+	| { ok: true; formatKey: BattleFormatKey; versionGroup: VersionGroup | null; team: PokemonSet[]; visualMeta: VisualMetaMap }
+	| { ok: false; code: ErrorCode; message: string; problems?: string[] };
+
+/** Validates a create/join payload and converts its PokePedia team into
+ * Showdown sets + sprite metadata. The format comes from the team's version
+ * group (src/versionRules.ts), never from the client. */
+function resolveTeam(message: Extract<ClientMessage, { t: 'create' | 'join' }>): ResolvedTeam {
+	if ((message.versionGroup !== null && !isVersionGroup(message.versionGroup)) || !isBattleTeam(message.team)) {
+		return { ok: false, code: 'invalid_message', message: `Invalid ${message.t} payload.` };
+	}
+	try {
+		const converted = convertTeam(message.team, message.versionGroup);
+		if (!converted.ok) return { ok: false, code: 'team_invalid', message: describeErrorCode('team_invalid'), problems: converted.problems };
+		return { ok: true, formatKey: converted.rules.formatKey, versionGroup: message.versionGroup, team: converted.team, visualMeta: converted.visualMeta };
+	} catch (err) {
+		return { ok: false, code: 'team_invalid', message: describeErrorCode('team_invalid'), problems: [err instanceof Error ? err.message : String(err)] };
+	}
 }
 
 function isChoice(value: unknown): value is Choice {
@@ -82,6 +137,31 @@ export function createBattleServer(options: BattleServerOptions = {}): BattleSer
 			res.end('ok');
 			return;
 		}
+		const roomCode = /^\/rooms\/([A-Za-z0-9]{1,16})$/.exec(req.url ?? '')?.[1];
+		if (roomCode) {
+			// Lets the join screen show a room's format and lock the team picker to
+			// its version group before the player commits to a WebSocket join.
+			// Browsers enforce CORS on this plain GET, unlike the WS upgrade.
+			const origin = req.headers.origin;
+			const headers: Record<string, string> = { 'content-type': 'application/json' };
+			if (allowedOrigins.length === 0) headers['access-control-allow-origin'] = '*';
+			else if (origin && allowedOrigins.includes(origin)) headers['access-control-allow-origin'] = origin;
+			const room = registry.get(roomCode);
+			if (!room) {
+				res.writeHead(404, headers);
+				res.end(JSON.stringify({ error: 'room_not_found' }));
+				return;
+			}
+			res.writeHead(200, headers);
+			res.end(JSON.stringify({
+				code: room.code,
+				versionGroup: room.versionGroup,
+				formatName: room.formatName,
+				host: room.players.p1?.name ?? '',
+				joinable: !room.isFull(),
+			}));
+			return;
+		}
 		res.writeHead(404);
 		res.end();
 	});
@@ -110,44 +190,44 @@ export function createBattleServer(options: BattleServerOptions = {}): BattleSer
 			switch (message.t) {
 				case 'create': {
 					if (room) return;
-					if (
-						!isBattleFormatKey(message.formatKey) ||
-						typeof message.name !== 'string' ||
-						!isPokemonSetArray(message.team) ||
-						!isVisualMetaMap(message.visualMeta)
-					) {
+					if (typeof message.name !== 'string') {
 						sendError(ws, 'invalid_message', 'Invalid create payload.');
 						return;
 					}
-					const result = registry.create(message.formatKey, message.name, message.team, message.visualMeta, m => send(ws, m));
+					const resolved = resolveTeam(message);
+					if (!resolved.ok) {
+						sendError(ws, resolved.code, resolved.message, resolved.problems);
+						return;
+					}
+					const result = registry.create(resolved.formatKey, resolved.versionGroup, message.name, resolved.team, resolved.visualMeta, m => send(ws, m));
 					if ('code' in result) {
 						sendError(ws, result.code, describeErrorCode(result.code), 'problems' in result ? result.problems : undefined);
 						return;
 					}
 					room = result.room;
 					seat = 'p1';
-					send(ws, { t: 'created', code: room.code, seat, seatToken: result.seatInfo.seatToken, format: room.format });
+					send(ws, { t: 'created', code: room.code, seat, seatToken: result.seatInfo.seatToken, format: room.format, formatName: room.formatName });
 					break;
 				}
 				case 'join': {
 					if (room) return;
-					if (
-						typeof message.code !== 'string' ||
-						typeof message.name !== 'string' ||
-						!isPokemonSetArray(message.team) ||
-						!isVisualMetaMap(message.visualMeta)
-					) {
+					if (typeof message.code !== 'string' || typeof message.name !== 'string') {
 						sendError(ws, 'invalid_message', 'Invalid join payload.');
 						return;
 					}
-					const result = registry.join(message.code, message.name, message.team, message.visualMeta, m => send(ws, m));
+					const resolved = resolveTeam(message);
+					if (!resolved.ok) {
+						sendError(ws, resolved.code, resolved.message, resolved.problems);
+						return;
+					}
+					const result = registry.join(message.code, resolved.versionGroup, message.name, resolved.team, resolved.visualMeta, m => send(ws, m));
 					if ('code' in result) {
 						sendError(ws, result.code, describeErrorCode(result.code), 'problems' in result ? result.problems : undefined);
 						return;
 					}
 					room = result.room;
 					seat = 'p2';
-					send(ws, { t: 'joined', code: room.code, seat, seatToken: result.seatInfo.seatToken, format: room.format });
+					send(ws, { t: 'joined', code: room.code, seat, seatToken: result.seatInfo.seatToken, format: room.format, formatName: room.formatName });
 					break;
 				}
 				case 'resume': {
@@ -242,4 +322,12 @@ if (isMain) {
 	handle.server.listen(DEFAULT_PORT, () => {
 		console.log(`pokepedia-battle listening on :${DEFAULT_PORT}`);
 	});
+	const apiUrl = process.env.POKEPEDIA_API_URL;
+	if (apiUrl) {
+		void loadHomeIds(apiUrl).then(count => {
+			if (count > 0) console.log(`Loaded ${count} HOME sprite ids from ${apiUrl}`);
+		});
+	} else {
+		console.warn('POKEPEDIA_API_URL is not set; forme sprites fall back to dex numbers.');
+	}
 }

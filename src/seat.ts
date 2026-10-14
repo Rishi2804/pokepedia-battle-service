@@ -97,7 +97,8 @@ export class Seat {
 
 	constructor(
 		private readonly seatId: SideID,
-		private readonly format: string
+		private readonly format: string,
+		private readonly formatName: string
 	) {
 		this.battle = new Battle(gens, seatId as unknown as ID);
 		this.formatter = new LogFormatter(seatId, this.battle);
@@ -166,7 +167,7 @@ export class Seat {
 
 		this.logHistory.push(...log);
 
-		const view = project(this.battle, this.seatId, this.format, this.winner, visualMeta);
+		const view = project(this.battle, this.seatId, this.format, this.formatName, this.winner, visualMeta);
 		if (this.winner !== null) {
 			this.send({ t: 'end', winner: this.winner, log, view });
 		} else {
@@ -195,7 +196,7 @@ export class Seat {
 		this.winner = winner;
 		const entry: LogEntry = { text: message, kind: 'system' };
 		this.logHistory.push(entry);
-		const view = project(this.battle, this.seatId, this.format, this.winner, visualMeta);
+		const view = project(this.battle, this.seatId, this.format, this.formatName, this.winner, visualMeta);
 		this.send({ t: 'end', winner: this.winner, log: [entry], view });
 	}
 

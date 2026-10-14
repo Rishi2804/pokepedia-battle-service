@@ -1,10 +1,11 @@
 import { randomInt, randomUUID } from 'node:crypto';
 import type { PokemonSet } from '@pkmn/sim';
 import { BattleEngine } from './engine.js';
-import { type BattleFormatKey, formatFor } from './formats.js';
+import { type BattleFormatKey, formatFor, formatLabel } from './formats.js';
 import type { Choice, RoomPhase, ServerMessage, SideID, VisualMetaMap } from './protocol.js';
 import { Seat } from './seat.js';
 import { validateTeam } from './teams.js';
+import type { VersionGroup } from './versionRules.js';
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I - read aloud/typed by hand
 const CODE_LENGTH = 6;
@@ -33,7 +34,11 @@ export interface SeatInfo {
 export class Room {
 	readonly code: string;
 	readonly formatKey: BattleFormatKey;
+	/** The game the host's team was built for (null for a Home team). Joiners
+	 * must match it exactly - see RoomRegistry.join. */
+	readonly versionGroup: VersionGroup | null;
 	readonly format: string;
+	readonly formatName: string;
 	phase: RoomPhase = 'waiting';
 	engine: BattleEngine | null = null;
 	readonly createdAt = Date.now();
@@ -45,10 +50,12 @@ export class Room {
 	private mergedVisualMeta: VisualMetaMap | null = null;
 	private readonly disconnectTimers: Partial<Record<SideID, ReturnType<typeof setTimeout>>> = {};
 
-	constructor(code: string, formatKey: BattleFormatKey) {
+	constructor(code: string, formatKey: BattleFormatKey, versionGroup: VersionGroup | null) {
 		this.code = code;
 		this.formatKey = formatKey;
+		this.versionGroup = versionGroup;
 		this.format = formatFor(formatKey);
+		this.formatName = formatLabel(formatKey);
 	}
 
 	private touch(): void {
@@ -83,7 +90,7 @@ export class Room {
 		info: { name: string; team: PokemonSet[]; visualMeta: VisualMetaMap },
 		transport: Transport
 	): SeatInfo {
-		const seatInfo: SeatInfo = { ...info, seatToken: randomUUID(), seat: new Seat(side, this.format), transport };
+		const seatInfo: SeatInfo = { ...info, seatToken: randomUUID(), seat: new Seat(side, this.format, this.formatName), transport };
 		this.players[side] = seatInfo;
 		// attach before touch/tryStart/broadcastRoomState - those can send
 		// messages immediately, which would be lost if the transport wasn't
@@ -125,8 +132,8 @@ export class Room {
 
 		this.engine?.destroy();
 		this.engine = null;
-		p1.seat = new Seat('p1', this.format);
-		p2.seat = new Seat('p2', this.format);
+		p1.seat = new Seat('p1', this.format, this.formatName);
+		p2.seat = new Seat('p2', this.format, this.formatName);
 		this.attachTransport('p1', p1.transport);
 		this.attachTransport('p2', p2.transport);
 
@@ -230,6 +237,7 @@ export class Room {
 export type RoomError =
 	| { code: 'room_not_found' }
 	| { code: 'room_full' }
+	| { code: 'gen_mismatch' }
 	| { code: 'invalid_seat_token' }
 	| { code: 'team_invalid'; problems: string[] };
 
@@ -246,12 +254,13 @@ export class RoomRegistry {
 
 	create(
 		formatKey: BattleFormatKey,
+		versionGroup: VersionGroup | null,
 		name: string,
 		team: PokemonSet[],
 		visualMeta: VisualMetaMap,
 		transport: (message: ServerMessage) => void
 	): { room: Room; seatInfo: SeatInfo } | RoomError {
-		const room = new Room(this.generateCode(), formatKey);
+		const room = new Room(this.generateCode(), formatKey, versionGroup);
 		const validation = validateTeam(room.format, team);
 		if (!validation.valid) return { code: 'team_invalid', problems: validation.problems };
 
@@ -262,6 +271,7 @@ export class RoomRegistry {
 
 	join(
 		code: string,
+		versionGroup: VersionGroup | null,
 		name: string,
 		team: PokemonSet[],
 		visualMeta: VisualMetaMap,
@@ -270,12 +280,17 @@ export class RoomRegistry {
 		const room = this.rooms.get(code.toUpperCase());
 		if (!room) return { code: 'room_not_found' };
 		if (room.isFull()) return { code: 'room_full' };
+		if (room.versionGroup !== versionGroup) return { code: 'gen_mismatch' };
 
 		const validation = validateTeam(room.format, team);
 		if (!validation.valid) return { code: 'team_invalid', problems: validation.problems };
 
 		const seatInfo = room.addPlayer('p2', { name, team, visualMeta }, transport);
 		return { room, seatInfo };
+	}
+
+	get(code: string): Room | undefined {
+		return this.rooms.get(code.toUpperCase());
 	}
 
 	resume(

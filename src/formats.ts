@@ -95,6 +95,14 @@ export function isBattleFormatKey(key: unknown): key is BattleFormatKey {
 	return key === 'nationaldex' || key === 'legendsza' || (typeof key === 'number' && isSupportedGen(key));
 }
 
+/** What a player sees for a room's format - built from the key, not parsed
+ * back out of the (very long) Showdown format id. */
+export function formatLabel(key: BattleFormatKey): string {
+	if (key === 'nationaldex') return 'National Dex Anything Goes';
+	if (key === 'legendsza') return 'Legends: Z-A Anything Goes';
+	return `Gen ${key} Anything Goes`;
+}
+
 export function formatFor(key: BattleFormatKey): string {
 	if (key === 'nationaldex') return NATIONAL_DEX_FORMAT;
 	if (key === 'legendsza') return LEGENDS_ZA_FORMAT;

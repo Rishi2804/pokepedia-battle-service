@@ -16,6 +16,8 @@ import type {
 	SlotView,
 	VisualMetaMap,
 } from './protocol.js';
+import { homeSpriteId } from './homeIds.js';
+import { battleSprite } from './sprites.js';
 
 /** Same normalization Showdown's own `toID` uses (sim/dex-data.ts) and what
  * the frontend's `toShowdownId(slug)` produces - lowercase, alphanumeric
@@ -96,13 +98,15 @@ export function fixRequest(request: any, protocol: typeof Protocol): Protocol.Re
  * id then only exists in the opponent's map (confirmed during
  * implementation: a Ditto that transformed into the foe's Rhyperior needs
  * the foe's visualMeta entry to render correctly). Falls back to the
- * national dex number for an untransformed/unrevealed species, which covers
- * base forms but not every alt forme - the UI's final fallback is a
- * placeholder tile.
+ * PokePedia's own id for that forme (homeIds.ts), then the national dex
+ * number, which covers base forms but not every alt forme - the UI's final
+ * fallback is a placeholder tile.
  */
-function spriteIdFor(speciesId: string, nationalDexNum: number | undefined, visualMeta: VisualMetaMap): number | null {
+export function spriteIdFor(speciesId: string, nationalDexNum: number | undefined, visualMeta: VisualMetaMap): number | null {
 	const meta = visualMeta[speciesId];
 	if (meta) return meta.pokemonId;
+	const home = homeSpriteId(speciesId);
+	if (home !== undefined) return home;
 	if (nationalDexNum && nationalDexNum > 0) return nationalDexNum;
 	return null;
 }
@@ -180,21 +184,23 @@ function projectSlot(battle: Battle, p: Pokemon, visualMeta: VisualMetaMap): Slo
 	};
 }
 
-function projectActive(battle: Battle, p: Pokemon, visualMeta: VisualMetaMap): ActiveView {
-	const dynamax = p.volatiles.dynamax as { gmax?: boolean } | undefined;
+function projectActive(battle: Battle, p: Pokemon, visualMeta: VisualMetaMap, facing: 'p1' | 'p2'): ActiveView {
+	const volatile = p.volatiles.dynamax as { gmax?: boolean } | undefined;
+	const dynamax = volatile ? (volatile.gmax ? 'gigantamax' : 'dynamax') : null;
 	return {
 		...projectSlot(battle, p, visualMeta),
-		dynamax: dynamax ? (dynamax.gmax ? 'gigantamax' : 'dynamax') : null,
+		sprite: battleSprite(p.speciesForme, { facing, shiny: p.shiny, gender: p.gender, gen: battle.gen.num, dynamax }),
+		dynamax,
 		boosts: p.boosts,
 		volatiles: Object.keys(p.volatiles).map(id => optionalNamed(battle.get('conditions', id))).filter((n): n is Named => n !== null),
 	};
 }
 
-function projectSide(battle: Battle, side: Battle['p1'], visualMeta: VisualMetaMap): SideView {
+function projectSide(battle: Battle, side: Battle['p1'], visualMeta: VisualMetaMap, facing: 'p1' | 'p2'): SideView {
 	return {
 		name: side.name,
 		teamSize: side.totalPokemon,
-		active: side.active[0] ? projectActive(battle, side.active[0], visualMeta) : null,
+		active: side.active[0] ? projectActive(battle, side.active[0], visualMeta, facing) : null,
 		team: side.team.map(p => projectSlot(battle, p, visualMeta)),
 		conditions: projectSideConditions(side.sideConditions as unknown as Record<string, { name: string; level: number }>),
 	};
@@ -274,6 +280,7 @@ export function project(
 	battle: Battle,
 	seat: SideID,
 	format: string,
+	formatName: string,
 	winner: SideID | 'tie' | null,
 	visualMeta: VisualMetaMap
 ): BattleView {
@@ -289,9 +296,10 @@ export function project(
 		turn: battle.turn,
 		gen: battle.gen.num,
 		format,
+		formatName,
 		field: projectField(battle),
-		me: projectSide(battle, me, visualMeta),
-		foe: projectSide(battle, foe, visualMeta),
+		me: projectSide(battle, me, visualMeta, 'p1'),
+		foe: projectSide(battle, foe, visualMeta, 'p2'),
 		winner: relativeWinner,
 		request: winner !== null ? null : projectRequest(battle, battle.request, visualMeta),
 	};
