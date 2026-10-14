@@ -6,7 +6,7 @@ import type { BattleFormatKey } from './formats.js';
 import type { BattleTeamMember, Choice, ClientMessage, ErrorCode, ServerMessage, SideID, StatSpread, VisualMetaMap } from './protocol.js';
 import { Room, RoomRegistry } from './rooms.js';
 import { convertTeam } from './teamConvert.js';
-import { isVersionGroup } from './versionRules.js';
+import { isVersionGroup, type VersionGroup } from './versionRules.js';
 
 const DEFAULT_PORT = Number(process.env.PORT ?? 3001);
 const SWEEP_INTERVAL_MS = 60_000;
@@ -36,6 +36,8 @@ function describeErrorCode(code: string): string {
 			return 'No battle room with that code.';
 		case 'room_full':
 			return 'That battle room already has two players.';
+		case 'gen_mismatch':
+			return "This room was created with a team from a different game - pick a team from the room's game to join.";
 		case 'team_invalid':
 			return 'Team failed validation for this format.';
 		case 'invalid_seat_token':
@@ -84,7 +86,7 @@ function isBattleTeam(value: unknown): value is BattleTeamMember[] {
 }
 
 type ResolvedTeam =
-	| { ok: true; formatKey: BattleFormatKey; team: PokemonSet[]; visualMeta: VisualMetaMap }
+	| { ok: true; formatKey: BattleFormatKey; versionGroup: VersionGroup | null; team: PokemonSet[]; visualMeta: VisualMetaMap }
 	| { ok: false; code: ErrorCode; message: string; problems?: string[] };
 
 /** Validates a create/join payload and converts its PokePedia team into
@@ -97,7 +99,7 @@ function resolveTeam(message: Extract<ClientMessage, { t: 'create' | 'join' }>):
 	try {
 		const converted = convertTeam(message.team, message.versionGroup);
 		if (!converted.ok) return { ok: false, code: 'team_invalid', message: describeErrorCode('team_invalid'), problems: converted.problems };
-		return { ok: true, formatKey: converted.rules.formatKey, team: converted.team, visualMeta: converted.visualMeta };
+		return { ok: true, formatKey: converted.rules.formatKey, versionGroup: message.versionGroup, team: converted.team, visualMeta: converted.visualMeta };
 	} catch (err) {
 		return { ok: false, code: 'team_invalid', message: describeErrorCode('team_invalid'), problems: [err instanceof Error ? err.message : String(err)] };
 	}
@@ -132,6 +134,31 @@ export function createBattleServer(options: BattleServerOptions = {}): BattleSer
 		if (req.url === '/healthz') {
 			res.writeHead(200, { 'content-type': 'text/plain' });
 			res.end('ok');
+			return;
+		}
+		const roomCode = /^\/rooms\/([A-Za-z0-9]{1,16})$/.exec(req.url ?? '')?.[1];
+		if (roomCode) {
+			// Lets the join screen show a room's format and lock the team picker to
+			// its version group before the player commits to a WebSocket join.
+			// Browsers enforce CORS on this plain GET, unlike the WS upgrade.
+			const origin = req.headers.origin;
+			const headers: Record<string, string> = { 'content-type': 'application/json' };
+			if (allowedOrigins.length === 0) headers['access-control-allow-origin'] = '*';
+			else if (origin && allowedOrigins.includes(origin)) headers['access-control-allow-origin'] = origin;
+			const room = registry.get(roomCode);
+			if (!room) {
+				res.writeHead(404, headers);
+				res.end(JSON.stringify({ error: 'room_not_found' }));
+				return;
+			}
+			res.writeHead(200, headers);
+			res.end(JSON.stringify({
+				code: room.code,
+				versionGroup: room.versionGroup,
+				formatName: room.formatName,
+				host: room.players.p1?.name ?? '',
+				joinable: !room.isFull(),
+			}));
 			return;
 		}
 		res.writeHead(404);
@@ -171,7 +198,7 @@ export function createBattleServer(options: BattleServerOptions = {}): BattleSer
 						sendError(ws, resolved.code, resolved.message, resolved.problems);
 						return;
 					}
-					const result = registry.create(resolved.formatKey, message.name, resolved.team, resolved.visualMeta, m => send(ws, m));
+					const result = registry.create(resolved.formatKey, resolved.versionGroup, message.name, resolved.team, resolved.visualMeta, m => send(ws, m));
 					if ('code' in result) {
 						sendError(ws, result.code, describeErrorCode(result.code), 'problems' in result ? result.problems : undefined);
 						return;
@@ -192,7 +219,7 @@ export function createBattleServer(options: BattleServerOptions = {}): BattleSer
 						sendError(ws, resolved.code, resolved.message, resolved.problems);
 						return;
 					}
-					const result = registry.join(message.code, message.name, resolved.team, resolved.visualMeta, m => send(ws, m));
+					const result = registry.join(message.code, resolved.versionGroup, message.name, resolved.team, resolved.visualMeta, m => send(ws, m));
 					if ('code' in result) {
 						sendError(ws, result.code, describeErrorCode(result.code), 'problems' in result ? result.problems : undefined);
 						return;
