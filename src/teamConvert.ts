@@ -88,8 +88,14 @@ function convertMember(member: BattleTeamMember, rules: ConversionRules, problem
 	// the species' first ability - what Showdown's own team builder defaults to.
 	const ability = member.ability || species.abilities[0];
 
-	const evs = rules.statExp ? mapSpread(member.evs, statExpToEv) : member.evs;
-	const ivs = rules.dvs ? mapSpread(member.ivs, dvToIv) : member.ivs;
+	const evs = rules.statExp ? mapSpread(member.evs, statExpToEv) : { ...member.evs };
+	const ivs = rules.dvs ? mapSpread(member.ivs, dvToIv) : { ...member.ivs };
+	// Gens 1-2 have one Special stat, which the team builder edits as SpA.
+	// Showdown validates SpA and SpD as the same stat there, so mirror it.
+	if (rules.statExp) {
+		evs.spd = evs.spa;
+		ivs.spd = ivs.spa;
+	}
 
 	const set: PokemonSet = {
 		name: member.nickname ?? species.name,

@@ -53,6 +53,12 @@ const CASES: Case[] = [
 		expect: s => (s.evs.atk === 252 && s.ivs.atk === 30 ? null : `evs/ivs ${JSON.stringify(s.evs)} ${JSON.stringify(s.ivs)}`),
 	},
 	{
+		label: 'gen 2 Special is mirrored so SpA and SpD agree',
+		versionGroup: 'GOLD_SILVER',
+		member: member({ slug: 'suicune', moves: ['Surf', 'Ice Beam', 'Rest', 'Roar'], item: 'leftovers', evs: { hp: 65535, atk: 0, def: 0, spa: 65535, spd: 0, spe: 65535 }, ivs: spread(15) }),
+		expect: s => (s.evs.spd === s.evs.spa && s.evs.spd === 252 && s.ivs.spd === s.ivs.spa ? null : `evs ${JSON.stringify(s.evs)}`),
+	},
+	{
 		label: 'gen 2 Hidden Power type comes from DVs',
 		versionGroup: 'GOLD_SILVER',
 		// Atk DV 13 / Def DV 13 is Hidden Power Bug.
