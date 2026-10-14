@@ -1,5 +1,6 @@
 import type { PokemonSet } from '@pkmn/sim';
 import type { BattleFormatKey } from './formats.js';
+import type { VersionGroup } from './versionRules.js';
 
 export type SideID = 'p1' | 'p2';
 export type RoomPhase = 'waiting' | 'validating' | 'battle' | 'ended';
@@ -205,6 +206,15 @@ export type Choice =
 	| { kind: 'undo' };
 
 export type ClientMessage =
+	// Native payloads: the team as PokePedia stores it, plus the version group
+	// it was built for (null for a Home team). The server converts it to
+	// Showdown sets and picks the format - see src/teamConvert.ts. `join` needs
+	// its own versionGroup because the conversion depends on the joiner's own
+	// team (a Gen 1 team stores Stat Exp/DVs), not the room's.
+	| { t: 'create'; versionGroup: VersionGroup | null; name: string; team: BattleTeamMember[] }
+	| { t: 'join'; code: string; versionGroup: VersionGroup | null; name: string; team: BattleTeamMember[] }
+	// Legacy payloads (client already converted to Showdown sets). Removed once
+	// the UI sends native teams.
 	// `formatKey` is what the room should play under (a gen, or 'nationaldex'),
 	// not the resolved Showdown format id - that comes back as `format` below.
 	| { t: 'create'; formatKey: BattleFormatKey; name: string; team: PokemonSet[]; visualMeta: VisualMetaMap }

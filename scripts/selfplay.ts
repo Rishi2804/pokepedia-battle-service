@@ -22,6 +22,7 @@ import { TeamGenerators } from '@pkmn/randoms';
 import WebSocket from 'ws';
 import { createBattleServer } from '../src/index.js';
 import { type BattleFormatKey, formatFor, isBattleFormatKey } from '../src/formats.js';
+import { toNativeTeam } from './nativeTeam.js';
 import type { BattleView, Choice, ClientMessage, RequestSwitchView, ServerMessage, SideID } from '../src/protocol.js';
 
 Teams.setGeneratorFactory(TeamGenerators);
@@ -286,10 +287,10 @@ async function runBattle(wsUrl: string, formatKey: BattleFormatKey, verbose: boo
 	try {
 		await Promise.all([p1.ready(), p2.ready()]);
 
-		p1.send({ t: 'create', formatKey, name: 'Player 1', team: team1, visualMeta: {} });
+		p1.send({ t: 'create', name: 'Player 1', ...toNativeTeam(formatKey, team1) });
 		const created = await p1.waitFor('created');
 
-		p2.send({ t: 'join', code: created.code, name: 'Player 2', team: team2, visualMeta: {} });
+		p2.send({ t: 'join', code: created.code, name: 'Player 2', ...toNativeTeam(formatKey, team2) });
 		await p2.waitFor('joined');
 
 		const battle = Promise.all([driveSeat(p1, 'p1'), driveSeat(p2, 'p2')]);
