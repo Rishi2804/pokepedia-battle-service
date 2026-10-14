@@ -13,6 +13,48 @@ export interface VisualMeta {
 /** Keyed by Showdown species id (toShowdownId(slug), lowercased/no punctuation). */
 export type VisualMetaMap = Record<string, VisualMeta>;
 
+export interface StatSpread {
+	hp: number;
+	atk: number;
+	def: number;
+	spa: number;
+	spd: number;
+	spe: number;
+}
+
+/**
+ * A team member as PokePedia's team builder stores it (the UI's
+ * PokemonTeamMember), in PokePedia's own units - src/teamConvert.ts turns it
+ * into a Showdown PokemonSet. Nothing here is Showdown-specific: species is a
+ * PokeAPI slug, item a slug, types/natures PokePedia's enum spellings, and
+ * evs/ivs whatever scale the team's version group uses (Stat Exp/DVs in gens
+ * 1-2).
+ */
+export interface BattleTeamMember {
+	/** PokePedia pokemon id - the HOME image shown for this species. */
+	pokemonId: number;
+	slug: string;
+	nickname: string | null;
+	shiny: boolean;
+	gender: 'male' | 'female' | 'genderless';
+	/** Ability display name; null lets the server pick the species' default. */
+	ability: string | null;
+	/** Move display names. */
+	moves: string[];
+	level: number;
+	/** Lowercase nature name ("adamant"). */
+	nature: string;
+	/** Item slug ("choicescarf"). */
+	item: string | null;
+	evs: StatSpread;
+	ivs: StatSpread;
+	happiness: number;
+	/** PokePedia type enum ("FIRE"). */
+	teraType: string | null;
+	dynamaxLevel: number;
+	gigantamax: boolean;
+}
+
 /** A dex object (move/item/ability/type/weather/...) reduced to what the UI
  * renders - id for icons/lookups, name for display. Resolved server-side so
  * the browser never needs its own dex. */
