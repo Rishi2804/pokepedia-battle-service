@@ -9,4 +9,8 @@ services:
     environment:
       PORT: 3001
       BATTLE_ALLOWED_ORIGINS: ${BATTLE_ALLOWED_ORIGINS:-http://localhost:1513}
+      # The API runs in its own compose project, so reach it through the host.
+      POKEPEDIA_API_URL: ${POKEPEDIA_API_URL:-http://host.docker.internal:8080/api/v1}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped

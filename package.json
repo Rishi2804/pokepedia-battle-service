@@ -11,6 +11,7 @@
     "typecheck": "tsc -p . --noEmit",
     "selfplay": "tsx scripts/selfplay.ts",
     "roomcheck": "tsx scripts/room-check.ts",
+    "homecheck": "tsx scripts/home-ids-check.ts",
     "play": "tsx scripts/client.ts"
   },
   "dependencies": {

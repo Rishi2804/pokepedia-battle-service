@@ -16,6 +16,7 @@ import type {
 	SlotView,
 	VisualMetaMap,
 } from './protocol.js';
+import { homeSpriteId } from './homeIds.js';
 
 /** Same normalization Showdown's own `toID` uses (sim/dex-data.ts) and what
  * the frontend's `toShowdownId(slug)` produces - lowercase, alphanumeric
@@ -96,13 +97,15 @@ export function fixRequest(request: any, protocol: typeof Protocol): Protocol.Re
  * id then only exists in the opponent's map (confirmed during
  * implementation: a Ditto that transformed into the foe's Rhyperior needs
  * the foe's visualMeta entry to render correctly). Falls back to the
- * national dex number for an untransformed/unrevealed species, which covers
- * base forms but not every alt forme - the UI's final fallback is a
- * placeholder tile.
+ * PokePedia's own id for that forme (homeIds.ts), then the national dex
+ * number, which covers base forms but not every alt forme - the UI's final
+ * fallback is a placeholder tile.
  */
-function spriteIdFor(speciesId: string, nationalDexNum: number | undefined, visualMeta: VisualMetaMap): number | null {
+export function spriteIdFor(speciesId: string, nationalDexNum: number | undefined, visualMeta: VisualMetaMap): number | null {
 	const meta = visualMeta[speciesId];
 	if (meta) return meta.pokemonId;
+	const home = homeSpriteId(speciesId);
+	if (home !== undefined) return home;
 	if (nationalDexNum && nationalDexNum > 0) return nationalDexNum;
 	return null;
 }

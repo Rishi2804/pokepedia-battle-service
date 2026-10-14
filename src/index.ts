@@ -4,6 +4,7 @@ import type { PokemonSet } from '@pkmn/sim';
 import { type RawData, WebSocketServer, type WebSocket } from 'ws';
 import type { BattleFormatKey } from './formats.js';
 import type { BattleTeamMember, Choice, ClientMessage, ErrorCode, ServerMessage, SideID, StatSpread, VisualMetaMap } from './protocol.js';
+import { loadHomeIds } from './homeIds.js';
 import { Room, RoomRegistry } from './rooms.js';
 import { convertTeam } from './teamConvert.js';
 import { isVersionGroup, type VersionGroup } from './versionRules.js';
@@ -321,4 +322,12 @@ if (isMain) {
 	handle.server.listen(DEFAULT_PORT, () => {
 		console.log(`pokepedia-battle listening on :${DEFAULT_PORT}`);
 	});
+	const apiUrl = process.env.POKEPEDIA_API_URL;
+	if (apiUrl) {
+		void loadHomeIds(apiUrl).then(count => {
+			if (count > 0) console.log(`Loaded ${count} HOME sprite ids from ${apiUrl}`);
+		});
+	} else {
+		console.warn('POKEPEDIA_API_URL is not set; forme sprites fall back to dex numbers.');
+	}
 }
