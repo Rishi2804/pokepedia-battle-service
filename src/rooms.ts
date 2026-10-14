@@ -1,7 +1,7 @@
 import { randomInt, randomUUID } from 'node:crypto';
 import type { PokemonSet } from '@pkmn/sim';
 import { BattleEngine } from './engine.js';
-import { type BattleFormatKey, formatFor } from './formats.js';
+import { type BattleFormatKey, formatFor, formatLabel } from './formats.js';
 import type { Choice, RoomPhase, ServerMessage, SideID, VisualMetaMap } from './protocol.js';
 import { Seat } from './seat.js';
 import { validateTeam } from './teams.js';
@@ -34,6 +34,7 @@ export class Room {
 	readonly code: string;
 	readonly formatKey: BattleFormatKey;
 	readonly format: string;
+	readonly formatName: string;
 	phase: RoomPhase = 'waiting';
 	engine: BattleEngine | null = null;
 	readonly createdAt = Date.now();
@@ -49,6 +50,7 @@ export class Room {
 		this.code = code;
 		this.formatKey = formatKey;
 		this.format = formatFor(formatKey);
+		this.formatName = formatLabel(formatKey);
 	}
 
 	private touch(): void {
@@ -83,7 +85,7 @@ export class Room {
 		info: { name: string; team: PokemonSet[]; visualMeta: VisualMetaMap },
 		transport: Transport
 	): SeatInfo {
-		const seatInfo: SeatInfo = { ...info, seatToken: randomUUID(), seat: new Seat(side, this.format), transport };
+		const seatInfo: SeatInfo = { ...info, seatToken: randomUUID(), seat: new Seat(side, this.format, this.formatName), transport };
 		this.players[side] = seatInfo;
 		// attach before touch/tryStart/broadcastRoomState - those can send
 		// messages immediately, which would be lost if the transport wasn't
@@ -125,8 +127,8 @@ export class Room {
 
 		this.engine?.destroy();
 		this.engine = null;
-		p1.seat = new Seat('p1', this.format);
-		p2.seat = new Seat('p2', this.format);
+		p1.seat = new Seat('p1', this.format, this.formatName);
+		p2.seat = new Seat('p2', this.format, this.formatName);
 		this.attachTransport('p1', p1.transport);
 		this.attachTransport('p2', p2.transport);
 

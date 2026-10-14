@@ -274,6 +274,7 @@ export function project(
 	battle: Battle,
 	seat: SideID,
 	format: string,
+	formatName: string,
 	winner: SideID | 'tie' | null,
 	visualMeta: VisualMetaMap
 ): BattleView {
@@ -289,6 +290,7 @@ export function project(
 		turn: battle.turn,
 		gen: battle.gen.num,
 		format,
+		formatName,
 		field: projectField(battle),
 		me: projectSide(battle, me, visualMeta),
 		foe: projectSide(battle, foe, visualMeta),

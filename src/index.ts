@@ -178,7 +178,7 @@ export function createBattleServer(options: BattleServerOptions = {}): BattleSer
 					}
 					room = result.room;
 					seat = 'p1';
-					send(ws, { t: 'created', code: room.code, seat, seatToken: result.seatInfo.seatToken, format: room.format });
+					send(ws, { t: 'created', code: room.code, seat, seatToken: result.seatInfo.seatToken, format: room.format, formatName: room.formatName });
 					break;
 				}
 				case 'join': {
@@ -199,7 +199,7 @@ export function createBattleServer(options: BattleServerOptions = {}): BattleSer
 					}
 					room = result.room;
 					seat = 'p2';
-					send(ws, { t: 'joined', code: room.code, seat, seatToken: result.seatInfo.seatToken, format: room.format });
+					send(ws, { t: 'joined', code: room.code, seat, seatToken: result.seatInfo.seatToken, format: room.format, formatName: room.formatName });
 					break;
 				}
 				case 'resume': {

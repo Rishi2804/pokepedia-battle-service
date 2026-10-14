@@ -186,6 +186,8 @@ export interface BattleView {
 	turn: number;
 	gen: number;
 	format: string;
+	/** Display label for the format ("Gen 4 Anything Goes"); `format` is the raw Showdown id. */
+	formatName: string;
 	field: FieldView;
 	me: SideView;
 	foe: SideView;
@@ -223,8 +225,8 @@ export type ClientMessage =
 // `t: 'created' | 'joined'` isn't assignable to `t: 'created'` alone, so
 // Extract resolves to `never`.
 export type ServerMessage =
-	| { t: 'created'; code: string; seat: SideID; seatToken: string; format: string }
-	| { t: 'joined'; code: string; seat: SideID; seatToken: string; format: string }
+	| { t: 'created'; code: string; seat: SideID; seatToken: string; format: string; formatName: string }
+	| { t: 'joined'; code: string; seat: SideID; seatToken: string; format: string; formatName: string }
 	| { t: 'roomState'; phase: RoomPhase; players: Partial<Record<SideID, string>> }
 	| { t: 'update'; log: LogEntry[]; view: BattleView }
 	/** Raw per-seat sim protocol lines, gated behind a dev flag. Not part of

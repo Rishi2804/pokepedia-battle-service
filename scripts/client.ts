@@ -173,7 +173,7 @@ function renderBench(side: SideView): string {
 
 function renderView(view: BattleView): void {
 	console.log('\n' + '='.repeat(60));
-	console.log(`Turn ${view.turn} | ${view.format} | Gen ${view.gen} | Phase: ${view.phase}`);
+	console.log(`Turn ${view.turn} | ${view.formatName} | Gen ${view.gen} | Phase: ${view.phase}`);
 	if (view.field.weather || view.field.terrain || view.field.pseudoWeather.length) {
 		const parts = [
 			view.field.weather?.name,
@@ -337,7 +337,7 @@ async function main(): Promise<void> {
 	} else {
 		connection.send({ t: 'create', name: 'Player', ...toNativeTeam(args.formatKey, team) });
 		const created = await connection.waitFor('created');
-		console.log(`Created room ${created.code} as ${created.seat} (${created.format}).`);
+		console.log(`Created room ${created.code} as ${created.seat} (${created.formatName}).`);
 
 		if (args.mode === 'vs-bot') {
 			const bot = new Connection(args.wsUrl);

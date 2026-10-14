@@ -21,7 +21,7 @@ import { Dex, Teams, TeamValidator, type PokemonSet } from '@pkmn/sim';
 import { TeamGenerators } from '@pkmn/randoms';
 import WebSocket from 'ws';
 import { createBattleServer } from '../src/index.js';
-import { type BattleFormatKey, formatFor, isBattleFormatKey } from '../src/formats.js';
+import { type BattleFormatKey, formatFor, formatLabel, isBattleFormatKey } from '../src/formats.js';
 import { toNativeTeam } from './nativeTeam.js';
 import type { BattleView, Choice, ClientMessage, RequestSwitchView, ServerMessage, SideID } from '../src/protocol.js';
 
@@ -123,6 +123,7 @@ function chooseFor(view: BattleView): Choice | null {
 /** hpPercent/hpColor are derived fields (view.ts) - recomputed independently
  * here so a projection bug shows up as a test failure, not just trusted. */
 function checkViewInvariants(view: BattleView, seat: SideID): void {
+	if (!view.formatName) throw new Error(`${seat}: view has no formatName`);
 	for (const side of [view.me, view.foe]) {
 		for (const slot of side.team) {
 			const expectedPercent = slot.maxhp > 0 ? Math.round((slot.hp / slot.maxhp) * 100) : 0;
@@ -289,6 +290,9 @@ async function runBattle(wsUrl: string, formatKey: BattleFormatKey, verbose: boo
 
 		p1.send({ t: 'create', name: 'Player 1', ...toNativeTeam(formatKey, team1) });
 		const created = await p1.waitFor('created');
+		if (created.formatName !== formatLabel(formatKey)) {
+			throw new Error(`created.formatName is "${created.formatName}", expected "${formatLabel(formatKey)}"`);
+		}
 
 		p2.send({ t: 'join', code: created.code, name: 'Player 2', ...toNativeTeam(formatKey, team2) });
 		await p2.waitFor('joined');
