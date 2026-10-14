@@ -125,6 +125,7 @@ function chooseFor(view: BattleView): Choice | null {
 function checkViewInvariants(view: BattleView, seat: SideID): void {
 	if (!view.formatName) throw new Error(`${seat}: view has no formatName`);
 	for (const side of [view.me, view.foe]) {
+		if (side.active && !side.active.sprite?.url) throw new Error(`${seat}: active ${side.active.ident} has no sprite`);
 		for (const slot of side.team) {
 			const expectedPercent = slot.maxhp > 0 ? Math.round((slot.hp / slot.maxhp) * 100) : 0;
 			if (slot.hpPercent !== expectedPercent) {

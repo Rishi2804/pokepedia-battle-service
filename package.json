@@ -12,11 +12,13 @@
     "selfplay": "tsx scripts/selfplay.ts",
     "roomcheck": "tsx scripts/room-check.ts",
     "homecheck": "tsx scripts/home-ids-check.ts",
+    "spritecheck": "tsx scripts/sprites-check.ts",
     "play": "tsx scripts/client.ts"
   },
   "dependencies": {
     "@pkmn/client": "^0.7.3",
     "@pkmn/data": "^0.10.11",
+    "@pkmn/img": "^0.3.4",
     "@pkmn/sim": "^0.10.11",
     "@pkmn/view": "^0.7.3",
     "ws": "^8.18.0"

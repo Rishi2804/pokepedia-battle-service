@@ -17,6 +17,7 @@ import type {
 	VisualMetaMap,
 } from './protocol.js';
 import { homeSpriteId } from './homeIds.js';
+import { battleSprite } from './sprites.js';
 
 /** Same normalization Showdown's own `toID` uses (sim/dex-data.ts) and what
  * the frontend's `toShowdownId(slug)` produces - lowercase, alphanumeric
@@ -183,21 +184,23 @@ function projectSlot(battle: Battle, p: Pokemon, visualMeta: VisualMetaMap): Slo
 	};
 }
 
-function projectActive(battle: Battle, p: Pokemon, visualMeta: VisualMetaMap): ActiveView {
-	const dynamax = p.volatiles.dynamax as { gmax?: boolean } | undefined;
+function projectActive(battle: Battle, p: Pokemon, visualMeta: VisualMetaMap, facing: 'p1' | 'p2'): ActiveView {
+	const volatile = p.volatiles.dynamax as { gmax?: boolean } | undefined;
+	const dynamax = volatile ? (volatile.gmax ? 'gigantamax' : 'dynamax') : null;
 	return {
 		...projectSlot(battle, p, visualMeta),
-		dynamax: dynamax ? (dynamax.gmax ? 'gigantamax' : 'dynamax') : null,
+		sprite: battleSprite(p.speciesForme, { facing, shiny: p.shiny, gender: p.gender, gen: battle.gen.num, dynamax }),
+		dynamax,
 		boosts: p.boosts,
 		volatiles: Object.keys(p.volatiles).map(id => optionalNamed(battle.get('conditions', id))).filter((n): n is Named => n !== null),
 	};
 }
 
-function projectSide(battle: Battle, side: Battle['p1'], visualMeta: VisualMetaMap): SideView {
+function projectSide(battle: Battle, side: Battle['p1'], visualMeta: VisualMetaMap, facing: 'p1' | 'p2'): SideView {
 	return {
 		name: side.name,
 		teamSize: side.totalPokemon,
-		active: side.active[0] ? projectActive(battle, side.active[0], visualMeta) : null,
+		active: side.active[0] ? projectActive(battle, side.active[0], visualMeta, facing) : null,
 		team: side.team.map(p => projectSlot(battle, p, visualMeta)),
 		conditions: projectSideConditions(side.sideConditions as unknown as Record<string, { name: string; level: number }>),
 	};
@@ -295,8 +298,8 @@ export function project(
 		format,
 		formatName,
 		field: projectField(battle),
-		me: projectSide(battle, me, visualMeta),
-		foe: projectSide(battle, foe, visualMeta),
+		me: projectSide(battle, me, visualMeta, 'p1'),
+		foe: projectSide(battle, foe, visualMeta, 'p2'),
 		winner: relativeWinner,
 		request: winner !== null ? null : projectRequest(battle, battle.request, visualMeta),
 	};
