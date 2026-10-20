@@ -33,7 +33,7 @@ function showdownGender(gender: BattleTeamMember['gender']): string {
 	return '';
 }
 
-interface ResolvedSpecies {
+export interface ResolvedSpecies {
 	/** The species actually submitted - never a battle-only forme. */
 	species: Species;
 	/** Set when the picked forme is only reachable by holding an item
@@ -48,12 +48,9 @@ interface ResolvedSpecies {
  * reaches the forme. The sim's own `battleOnly` field marks these (and derives
  * it for Mega/Primal formes); Gmax formes only carry `changesFrom`. Where a
  * forme has more than one base (Zygarde-Complete, Necrozma-Ultra), the first
- * is used.
+ * is used. Returns null only if the base species can't be found.
  */
-function resolveSpecies(slug: string): ResolvedSpecies | null {
-	const picked = Dex.species.get(showdownIdFromSlug(slug));
-	if (!picked.exists) return null;
-
+export function resolveBattleOnly(picked: Species): ResolvedSpecies | null {
 	const isGmax = picked.forme.endsWith('Gmax');
 	const base = picked.battleOnly ?? (isGmax ? picked.changesFrom : undefined);
 	if (!base) return { species: picked, gigantamax: false };
@@ -66,6 +63,12 @@ function resolveSpecies(slug: string): ResolvedSpecies | null {
 	if (!baseSpecies.exists) return null;
 	const requiredItem = picked.requiredItem ?? picked.requiredItems?.[0];
 	return { species: baseSpecies, requiredItem: requiredItem ? Dex.items.get(requiredItem).name : undefined, gigantamax: isGmax };
+}
+
+function resolveSpecies(slug: string): ResolvedSpecies | null {
+	const picked = Dex.species.get(showdownIdFromSlug(slug));
+	if (!picked.exists) return null;
+	return resolveBattleOnly(picked);
 }
 
 function convertMember(member: BattleTeamMember, rules: ConversionRules, problems: string[]): PokemonSet | null {

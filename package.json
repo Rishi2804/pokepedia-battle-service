@@ -13,6 +13,7 @@
     "roomcheck": "tsx scripts/room-check.ts",
     "homecheck": "tsx scripts/home-ids-check.ts",
     "spritecheck": "tsx scripts/sprites-check.ts",
+    "dumpdex": "tsx scripts/dump-dex.ts",
     "play": "tsx scripts/client.ts"
   },
   "dependencies": {
