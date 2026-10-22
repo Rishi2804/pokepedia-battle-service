@@ -1,12 +1,13 @@
-import { createServer, type Server } from 'node:http';
+import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import type { PokemonSet } from '@pkmn/sim';
 import { type RawData, WebSocketServer, type WebSocket } from 'ws';
-import type { BattleFormatKey } from './formats.js';
+import { type BattleFormatKey, formatFor } from './formats.js';
 import type { BattleTeamMember, Choice, ClientMessage, ErrorCode, ServerMessage, SideID, StatSpread, VisualMetaMap } from './protocol.js';
 import { loadHomeIds } from './homeIds.js';
 import { Room, RoomRegistry } from './rooms.js';
 import { convertTeam } from './teamConvert.js';
+import { validateTeam } from './teams.js';
 import { isVersionGroup, type VersionGroup } from './versionRules.js';
 
 const DEFAULT_PORT = Number(process.env.PORT ?? 3001);
@@ -107,6 +108,50 @@ function resolveTeam(message: Extract<ClientMessage, { t: 'create' | 'join' }>):
 	}
 }
 
+/** The result of POST /validate: the same problems creating or joining a room
+ * with this team would report, without needing a room. */
+export interface ValidateResponse {
+	valid: boolean;
+	problems: string[];
+}
+
+/** Checks a team the way a room would - conversion problems first (unknown
+ * species, moves, abilities, items...), then Showdown's own validator for the
+ * team's format - so the team builder can show them while a team is being
+ * built instead of at battle time. */
+function validateRequest(body: unknown): { ok: true; response: ValidateResponse } | { ok: false } {
+	if (typeof body !== 'object' || body === null) return { ok: false };
+	const { versionGroup, team } = body as { versionGroup?: unknown; team?: unknown };
+	if (versionGroup === undefined || (versionGroup !== null && !isVersionGroup(versionGroup)) || !isBattleTeam(team)) {
+		return { ok: false };
+	}
+	const resolved = resolveTeam({ t: 'create', versionGroup, name: '', team });
+	if (!resolved.ok) return { ok: true, response: { valid: false, problems: resolved.problems ?? [resolved.message] } };
+	const validation = validateTeam(formatFor(resolved.formatKey), resolved.team);
+	return { ok: true, response: validation };
+}
+
+const MAX_VALIDATE_BODY_BYTES = 256 * 1024;
+
+/** Reads a request body up to a size cap; null if it is over the cap. */
+function readBody(req: IncomingMessage, maxBytes: number): Promise<string | null> {
+	return new Promise((resolve, reject) => {
+		const chunks: Buffer[] = [];
+		let size = 0;
+		req.on('data', (chunk: Buffer) => {
+			size += chunk.length;
+			if (size > maxBytes) {
+				resolve(null);
+				req.destroy();
+				return;
+			}
+			chunks.push(chunk);
+		});
+		req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+		req.on('error', reject);
+	});
+}
+
 function isChoice(value: unknown): value is Choice {
 	if (typeof value !== 'object' || value === null || !('kind' in value)) return false;
 	const v = value as Record<string, unknown>;
@@ -132,21 +177,67 @@ export function createBattleServer(options: BattleServerOptions = {}): BattleSer
 	const allowedOrigins = options.allowedOrigins ?? [];
 	const registry = new RoomRegistry();
 
+	// Browsers enforce CORS on plain HTTP requests, unlike the WS upgrade.
+	const corsHeaders = (req: IncomingMessage): Record<string, string> => {
+		const origin = req.headers.origin;
+		const headers: Record<string, string> = {};
+		if (allowedOrigins.length === 0) headers['access-control-allow-origin'] = '*';
+		else if (origin && allowedOrigins.includes(origin)) headers['access-control-allow-origin'] = origin;
+		return headers;
+	};
+
 	const server = createServer((req, res) => {
 		if (req.url === '/healthz') {
 			res.writeHead(200, { 'content-type': 'text/plain' });
 			res.end('ok');
 			return;
 		}
+		if (req.url === '/validate') {
+			const headers = { ...corsHeaders(req), 'content-type': 'application/json' };
+			if (req.method === 'OPTIONS') {
+				// The preflight a browser sends before a cross-origin JSON POST.
+				res.writeHead(204, { ...headers, 'access-control-allow-methods': 'POST, OPTIONS', 'access-control-allow-headers': 'content-type' });
+				res.end();
+				return;
+			}
+			if (req.method !== 'POST') {
+				res.writeHead(405, { ...headers, allow: 'POST, OPTIONS' });
+				res.end(JSON.stringify({ error: 'method_not_allowed' }));
+				return;
+			}
+			readBody(req, MAX_VALIDATE_BODY_BYTES).then(raw => {
+				if (raw === null) {
+					res.writeHead(413, headers);
+					res.end(JSON.stringify({ error: 'payload_too_large' }));
+					return;
+				}
+				let body: unknown;
+				try {
+					body = JSON.parse(raw);
+				} catch {
+					res.writeHead(400, headers);
+					res.end(JSON.stringify({ error: 'invalid_message' }));
+					return;
+				}
+				const result = validateRequest(body);
+				if (!result.ok) {
+					res.writeHead(400, headers);
+					res.end(JSON.stringify({ error: 'invalid_message' }));
+					return;
+				}
+				res.writeHead(200, headers);
+				res.end(JSON.stringify(result.response));
+			}).catch(() => {
+				res.writeHead(500, headers);
+				res.end(JSON.stringify({ error: 'internal_error' }));
+			});
+			return;
+		}
 		const roomCode = /^\/rooms\/([A-Za-z0-9]{1,16})$/.exec(req.url ?? '')?.[1];
 		if (roomCode) {
 			// Lets the join screen show a room's format and lock the team picker to
 			// its version group before the player commits to a WebSocket join.
-			// Browsers enforce CORS on this plain GET, unlike the WS upgrade.
-			const origin = req.headers.origin;
-			const headers: Record<string, string> = { 'content-type': 'application/json' };
-			if (allowedOrigins.length === 0) headers['access-control-allow-origin'] = '*';
-			else if (origin && allowedOrigins.includes(origin)) headers['access-control-allow-origin'] = origin;
+			const headers: Record<string, string> = { ...corsHeaders(req), 'content-type': 'application/json' };
 			const room = registry.get(roomCode);
 			if (!room) {
 				res.writeHead(404, headers);
