@@ -1,6 +1,5 @@
 import { Dex, type PokemonSet, type Species } from '@pkmn/sim';
 import type { BattleTeamMember, StatSpread, VisualMetaMap } from './protocol.js';
-import { showdownIdFromSlug } from './speciesIds.js';
 import { type ConversionRules, rulesFor, type VersionGroup } from './versionRules.js';
 
 export type TeamConversion =
@@ -65,16 +64,16 @@ export function resolveBattleOnly(picked: Species): ResolvedSpecies | null {
 	return { species: baseSpecies, requiredItem: requiredItem ? Dex.items.get(requiredItem).name : undefined, gigantamax: isGmax };
 }
 
-function resolveSpecies(slug: string): ResolvedSpecies | null {
-	const picked = Dex.species.get(showdownIdFromSlug(slug));
+function resolveSpecies(showdownId: string): ResolvedSpecies | null {
+	const picked = Dex.species.get(showdownId);
 	if (!picked.exists) return null;
 	return resolveBattleOnly(picked);
 }
 
 function convertMember(member: BattleTeamMember, rules: ConversionRules, problems: string[]): PokemonSet | null {
-	const resolved = resolveSpecies(member.slug);
+	const resolved = resolveSpecies(member.showdownId);
 	if (!resolved) {
-		problems.push(`Unknown Pokemon "${member.slug}".`);
+		problems.push(`Unknown Pokemon "${member.showdownId}" (${member.slug}).`);
 		return null;
 	}
 	const { species } = resolved;
@@ -89,7 +88,18 @@ function convertMember(member: BattleTeamMember, rules: ConversionRules, problem
 	// The validator doesn't fill in a blank ability itself (it rejects the set),
 	// and several version groups never show an ability picker, so fall back to
 	// the species' first ability - what Showdown's own team builder defaults to.
-	const ability = member.ability || species.abilities[0];
+	let ability = species.abilities[0];
+	if (member.ability) {
+		const resolvedAbility = Dex.abilities.get(member.ability);
+		if (resolvedAbility.exists) ability = resolvedAbility.name;
+		else problems.push(`${species.name}: unknown ability "${member.ability}".`);
+	}
+	for (const move of member.moves) {
+		if (!Dex.moves.get(move).exists) problems.push(`${species.name}: unknown move "${move}".`);
+	}
+	if (!Dex.natures.get(member.nature).exists) {
+		problems.push(`${species.name}: unknown nature "${member.nature}".`);
+	}
 
 	const evs = rules.statExp ? mapSpread(member.evs, statExpToEv) : { ...member.evs };
 	const ivs = rules.dvs ? mapSpread(member.ivs, dvToIv) : { ...member.ivs };
@@ -118,7 +128,11 @@ function convertMember(member: BattleTeamMember, rules: ConversionRules, problem
 	if (rules.hiddenPower && member.moves.some(m => Dex.moves.get(m).id === 'hiddenpower')) {
 		set.hpType = Dex.forGen(rules.dvs ? 2 : 9).getHiddenPower(ivs).type;
 	}
-	if (rules.tera && member.teraType) set.teraType = Dex.types.get(member.teraType).name;
+	if (rules.tera && member.teraType) {
+		const teraType = Dex.types.get(member.teraType);
+		if (teraType.exists) set.teraType = teraType.name;
+		else problems.push(`${species.name}: unknown Tera type "${member.teraType}".`);
+	}
 	if (rules.dynamax) {
 		set.dynamaxLevel = member.dynamaxLevel;
 		set.gigantamax = member.gigantamax || resolved.gigantamax;
@@ -142,7 +156,7 @@ export function convertTeam(members: BattleTeamMember[], versionGroup: VersionGr
 		const set = convertMember(member, rules, problems);
 		if (!set) continue;
 		team.push(set);
-		visualMeta[showdownIdFromSlug(member.slug)] = {
+		visualMeta[member.showdownId] = {
 			pokemonId: member.pokemonId,
 			shiny: member.shiny,
 			female: member.gender === 'female',

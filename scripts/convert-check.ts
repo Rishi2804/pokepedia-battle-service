@@ -2,7 +2,8 @@
  * Checks src/teamConvert.ts against hand-written PokePedia team members that
  * cover each conversion rule: Stat Exp/DVs (gens 1-2), Hidden Power typing,
  * version groups with no ability picker, battle-only formes saved directly
- * (Mega, Gmax, Crowned), and the slugs that need the Showdown id override.
+ * (Mega, Gmax, Crowned), a species whose Showdown id differs from its slug,
+ * and the problems reported for unknown species, moves, abilities and natures.
  * Every converted team must pass the real TeamValidator for its format.
  *
  * Usage: npx tsx scripts/convert-check.ts [--verbose]
@@ -21,6 +22,9 @@ const spread = (n: number): StatSpread => ({ hp: n, atk: n, def: n, spa: n, spd:
 function member(overrides: Partial<BattleTeamMember> & Pick<BattleTeamMember, 'slug' | 'moves'>): BattleTeamMember {
 	return {
 		pokemonId: 0,
+		// What the API's showdownId would be for the common slugs; cases whose slug
+		// doesn't normalise onto it pass showdownId explicitly.
+		showdownId: overrides.slug.replace(/[^a-z0-9]/g, ''),
 		nickname: null,
 		shiny: false,
 		gender: 'genderless',
@@ -84,9 +88,9 @@ const CASES: Case[] = [
 		expect: s => (s.species === 'Charizard' && s.gigantamax === true ? null : `${s.species} gmax=${s.gigantamax}`),
 	},
 	{
-		label: 'slug override + Tera type',
+		label: 'Showdown id that differs from the slug + Tera type',
 		versionGroup: 'SCARLET_VIOLET',
-		member: member({ slug: 'meowstic-female', gender: 'female', moves: ['Psychic', 'Shadow Ball', 'Calm Mind', 'Tera Blast'], teraType: 'FAIRY', ability: 'Competitive' }),
+		member: member({ slug: 'meowstic-female', showdownId: 'meowsticf', gender: 'female', moves: ['Psychic', 'Shadow Ball', 'Calm Mind', 'Tera Blast'], teraType: 'FAIRY', ability: 'Competitive' }),
 		expect: s => (s.species === 'Meowstic-F' && s.teraType === 'Fairy' && s.gender === 'F' ? null : `${s.species} tera ${s.teraType} gender ${s.gender}`),
 	},
 	{
@@ -123,6 +127,19 @@ const unknown = convertTeam([member({ slug: 'not-a-pokemon', moves: ['Tackle'] }
 const unknownOk = !unknown.ok && unknown.problems.some(p => p.includes('not-a-pokemon'));
 console.log(`${unknownOk ? 'ok  ' : 'FAIL'} unknown species is reported as a problem`);
 if (!unknownOk) failures++;
+
+// Anything the server can't resolve is a clear problem, not a validator error.
+const reported: [string, Partial<BattleTeamMember>, string][] = [
+	['unknown move', { moves: ['Not A Move'] }, 'unknown move "Not A Move"'],
+	['unknown ability', { moves: ['Psychic'], ability: 'Not An Ability' }, 'unknown ability "Not An Ability"'],
+	['unknown nature', { moves: ['Psychic'], nature: 'grumpy' }, 'unknown nature "grumpy"'],
+];
+for (const [label, overrides, expected] of reported) {
+	const result = convertTeam([member({ slug: 'mewtwo', moves: ['Psychic'], ...overrides })], null);
+	const ok = !result.ok && result.problems.some(p => p.includes(expected));
+	console.log(`${ok ? 'ok  ' : 'FAIL'} ${label} is reported as a problem`);
+	if (!ok) failures++;
+}
 
 console.log(failures ? `\n${failures} failing` : '\nall passing');
 process.exit(failures ? 1 : 0);

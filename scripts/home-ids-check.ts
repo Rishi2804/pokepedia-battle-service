@@ -1,6 +1,6 @@
 /**
  * Checks HOME sprite id resolution (src/homeIds.ts + view.ts's spriteIdFor):
- * a stubbed candidate list covers the id mapping, slug overrides and the
+ * a stubbed candidate list covers the id mapping (by the API's showdownId) and the
  * lookup order (team's own entry, then HOME id, then dex number). Set
  * POKEPEDIA_API_URL (e.g. http://localhost:8080/api/v1) to also check the
  * live API.
@@ -19,10 +19,10 @@ function check(label: string, ok: boolean, detail = ''): void {
 const stub = [{
 	listName: 'National',
 	pokemon: [
-		{ id: 6, slug: 'charizard' },
-		{ id: 10034, slug: 'charizard-mega-x' },
-		{ id: 678, slug: 'meowstic-male' },
-		{ id: 10025, slug: 'meowstic-female' },
+		{ id: 6, slug: 'charizard', showdownId: 'charizard' },
+		{ id: 10034, slug: 'charizard-mega-x', showdownId: 'charizardmegax' },
+		{ id: 678, slug: 'meowstic-male', showdownId: 'meowstic' },
+		{ id: 10025, slug: 'meowstic-female', showdownId: 'meowsticf' },
 	],
 }];
 const loaded = await loadHomeIds('http://stub', {
@@ -31,7 +31,7 @@ const loaded = await loadHomeIds('http://stub', {
 });
 check('stub list loads', loaded === 4, `loaded ${loaded}`);
 check('a forme resolves to its own HOME id', spriteIdFor('charizardmegax', 6, {}) === 10034);
-check('slug override maps onto the Showdown id', spriteIdFor('meowsticf', 678, {}) === 10025);
+check('a forme whose slug differs from its Showdown id resolves by the API\'s id', spriteIdFor('meowsticf', 678, {}) === 10025);
 check('the team\'s own entry wins', spriteIdFor('charizard', 6, { charizard: { pokemonId: 999, shiny: false, female: false } }) === 999);
 check('unknown forme falls back to the dex number', spriteIdFor('notaforme', 25, {}) === 25);
 check('no dex number gives null', spriteIdFor('notaforme', undefined, {}) === null);

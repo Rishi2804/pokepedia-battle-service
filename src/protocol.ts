@@ -25,26 +25,32 @@ export interface StatSpread {
 /**
  * A team member as PokePedia's team builder stores it (the UI's
  * PokemonTeamMember), in PokePedia's own units - src/teamConvert.ts turns it
- * into a Showdown PokemonSet. Nothing here is Showdown-specific: species is a
- * PokeAPI slug, item a slug, types/natures PokePedia's enum spellings, and
- * evs/ivs whatever scale the team's version group uses (Stat Exp/DVs in gens
- * 1-2).
+ * into a Showdown PokemonSet. Most of it is in PokePedia's own units: types/
+ * natures are PokePedia's enum spellings, and evs/ivs are whatever scale the
+ * team's version group uses (Stat Exp/DVs in gens 1-2). Species, item, ability
+ * and moves are identified by what the PokePedia API sends with them -
+ * Showdown's own ids and names - so this server never has to guess one from a
+ * slug.
  */
 export interface BattleTeamMember {
 	/** PokePedia pokemon id - the HOME image shown for this species. */
 	pokemonId: number;
+	/** PokeAPI slug, kept for display and debugging; never used to look the
+	 * species up. */
 	slug: string;
+	/** Showdown's species id ("charizardmegax"), from the API's showdownId. */
+	showdownId: string;
 	nickname: string | null;
 	shiny: boolean;
 	gender: 'male' | 'female' | 'genderless';
-	/** Ability display name; null lets the server pick the species' default. */
+	/** Ability name or Showdown id; null lets the server pick the species' default. */
 	ability: string | null;
-	/** Move display names. */
+	/** Move names or Showdown ids. */
 	moves: string[];
 	level: number;
 	/** Lowercase nature name ("adamant"). */
 	nature: string;
-	/** Item slug ("choicescarf"). */
+	/** Showdown item id ("choicescarf"). */
 	item: string | null;
 	evs: StatSpread;
 	ivs: StatSpread;

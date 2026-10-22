@@ -14,7 +14,7 @@ import type { BattleTeamMember, ClientMessage, ServerMessage } from '../src/prot
 
 const zero = { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 };
 const member = (slug: string, moves: string[]): BattleTeamMember => ({
-	pokemonId: 1, slug, nickname: null, shiny: false, gender: 'genderless', ability: null, moves, level: 100,
+	pokemonId: 1, slug, showdownId: slug, nickname: null, shiny: false, gender: 'genderless', ability: null, moves, level: 100,
 	nature: 'hardy', item: null, evs: { ...zero, hp: 84 }, ivs: { hp: 15, atk: 15, def: 15, spa: 15, spd: 15, spe: 15 },
 	happiness: 255, teraType: null, dynamaxLevel: 10, gigantamax: false,
 });

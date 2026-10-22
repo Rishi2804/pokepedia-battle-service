@@ -65,6 +65,7 @@ function isBattleTeamMember(value: unknown): value is BattleTeamMember {
 	return (
 		typeof v.pokemonId === 'number' &&
 		typeof v.slug === 'string' &&
+		typeof v.showdownId === 'string' &&
 		isNullableString(v.nickname) &&
 		typeof v.shiny === 'boolean' &&
 		typeof v.gender === 'string' && GENDERS.includes(v.gender) &&

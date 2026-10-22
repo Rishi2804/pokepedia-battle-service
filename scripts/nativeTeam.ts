@@ -34,6 +34,7 @@ function toMember(set: PokemonSet, formatKey: BattleFormatKey): BattleTeamMember
 	return {
 		pokemonId: species.num,
 		slug: species.id,
+		showdownId: species.id,
 		nickname: set.name && set.name !== set.species ? set.name : null,
 		shiny: !!set.shiny,
 		gender: set.gender === 'M' ? 'male' : set.gender === 'F' ? 'female' : 'genderless',
