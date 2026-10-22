@@ -15,6 +15,7 @@
     "homecheck": "tsx scripts/home-ids-check.ts",
     "spritecheck": "tsx scripts/sprites-check.ts",
     "dumpdex": "tsx scripts/dump-dex.ts",
+    "dumprules": "tsx scripts/dump-rules.ts",
     "play": "tsx scripts/client.ts"
   },
   "dependencies": {
