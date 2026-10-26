@@ -20,8 +20,7 @@ import { homeSpriteId } from './homeIds.js';
 import { battleSprite } from './sprites.js';
 
 /** Same normalization Showdown's own `toID` uses (sim/dex-data.ts) and what
- * the frontend's `toShowdownId(slug)` produces - lowercase, alphanumeric
- * only. Reimplemented locally rather than imported since it's one line and
+ * the API's showdownId fields hold - lowercase, alphanumeric only. Reimplemented locally rather than imported since it's one line and
  * none of our deps export it as a public API. */
 function toId(text: string): string {
 	return text.toLowerCase().replace(/[^a-z0-9]/g, '');

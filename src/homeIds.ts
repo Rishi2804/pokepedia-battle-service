@@ -1,5 +1,3 @@
-import { showdownIdFromSlug } from './speciesIds.js';
-
 /**
  * Showdown species id -> PokePedia pokemon id, for every forme PokePedia has
  * (each forme is its own `pokemon` row with its own HOME render). A team's own
@@ -13,14 +11,14 @@ export function homeSpriteId(speciesId: string): number | undefined {
 }
 
 interface CandidateGroup {
-	pokemon: { id: number; slug: string }[];
+	pokemon: { id: number; showdownId: string }[];
 }
 
 export function setHomeIds(groups: CandidateGroup[]): number {
 	const map = new Map<string, number>();
 	for (const group of groups) {
 		for (const candidate of group.pokemon) {
-			map.set(showdownIdFromSlug(candidate.slug), candidate.id);
+			map.set(candidate.showdownId, candidate.id);
 		}
 	}
 	homeIds = map;
